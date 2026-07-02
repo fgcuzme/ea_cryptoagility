@@ -12,6 +12,11 @@ import random
 import time, os
 from tangle_logger_light import MsTimer, log_tangle_event
 
+from ea_cryptoagility.integration_hooks import (
+    attach_policy_to_transaction,
+    log_ea_transaction,
+)
+
 global VERBOSE
 
 raw_per = os.environ.get("PER_VARIABLE", None)
@@ -38,6 +43,42 @@ def tx_time_ms(bits: int, bitrate: int) -> float:
 def proc_time_ms(fixed_ms: float = 20.0) -> float:
     return float(fixed_ms)
 ####
+
+### agregar helper
+def _ea_apply_policy_to_auth_tx(
+    tx,
+    sender_node,
+    ea_ctx,
+    epoch,
+    per_i,
+    ret_i=0.0,
+    dag_load_i=0.0,
+    security_risk_i=0.0,
+    message_type="JOIN",
+):
+    if ea_ctx is None or not ea_ctx.get("enabled", False):
+        return tx
+
+    scenario = ea_ctx["scenario"]
+
+    tx.setdefault("message_type", message_type)
+
+    tx = attach_policy_to_transaction(
+        tx=tx,
+        node=sender_node,
+        epoch=epoch,
+        key=ea_ctx["policy_key"],
+        per=per_i,
+        retransmission_rate=ret_i,
+        dag_load=dag_load_i,
+        security_risk=security_risk_i,
+        invalid_signature_rate=scenario.invalid_signature_rate,
+        downgrade_detected=scenario.downgrade_detected,
+        replay_detected=scenario.replay_detected,
+        suspicious_identity=scenario.suspicious_identity,
+    )
+
+    return tx
 
 # import pickle
 
@@ -84,7 +125,7 @@ table_events = []
 # Funcion para propagar tx genesis hacia los CHs
 # Los Ch deben validar la tx enviada por el genesis
 # Sink -> CH
-def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule, ronda, max_retries=3, timeout=2):
+def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule, ronda, ea_ctx=None, max_retries=3, timeout=2):
     """
     Función para propagar la transacción génesis del Sink a los CHs.
     Si un CH no responde en el tiempo establecido, se reintenta la propagación.
@@ -119,9 +160,28 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                 # calcular la distancia entre los nodos
                 dist = np.linalg.norm(Ch_node["Position"] - sink1["Position"])  # se debe comentar 10/09/2025
 
+                # calculo del tamaño de paquete real  ##
+                if ea_ctx is not None and ea_ctx.get("enabled", False):
+                    scenario = ea_ctx["scenario"]
+                    genesis_tx = _ea_apply_policy_to_auth_tx(
+                        tx=genesis_tx,
+                        sender_node=sink1,
+                        ea_ctx=ea_ctx,
+                        epoch=ronda + 1,
+                        per_i=scenario.per,
+                        ret_i=scenario.retransmission_rate,
+                        dag_load_i=scenario.dag_load,
+                        security_risk_i=scenario.security_risk,
+                        message_type="JOIN",
+                    )
+                    packet_size_auth_bits = int(genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
+                else:
+                    packet_size_auth_bits = PACKET_SIZE_AUTH
+                ###
+
                 # calular el per
                 per_sink_ch_auth, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
-                                                                              L=PACKET_SIZE_AUTH, bitrate=9200)
+                                                                              L=packet_size_auth_bits, bitrate=9200)
 
                 start_position = sink1["Position"]
                 end_position = Ch_node["Position"]
@@ -133,8 +193,8 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
 
                 success_auth = propagate_with_probability(per=per_sink_ch_auth, override_per=PER_VARIABLE)
                 p_lost_auth = not success_auth
-                bits_sent_auth = PACKET_SIZE_AUTH # bits
-                bits_received_auth = PACKET_SIZE_AUTH if success_auth else 0
+                bits_sent_auth = packet_size_auth_bits # bits
+                bits_received_auth = packet_size_auth_bits if success_auth else 0
 
                 # Simular probabilidad de recepción
                 if success_auth:
@@ -168,7 +228,7 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                             continue
 
                         # agrega nueva linea 08/10/2025
-                        store_ms = ingest_tx(RUN_ID, Ch_node, genesis_tx, add_as_tip=True)
+                        store_ms = ingest_tx(RUN_ID, Ch_node, genesis_tx, add_as_tip=True, ea_ctx=ea_ctx)
 
                         a,b,c = confidence_confirm_tx(RUN_ID, Ch_node, genesis_tx["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
@@ -187,6 +247,7 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                             # guardar la energía antes de actualizar
                             initial_energy_ch_tx = Ch_node["ResidualEnergy"]
 
+                            
                             # calular el per
                             per_ch_sink_auth_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
                                                                                               L=PACKET_SIZE_ACK, bitrate=9200)
@@ -244,7 +305,7 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                             # Propagar la Tx Génesis a los nodos del cluster del CH
                             # CH -> SN
                             propagate_genesis_to_cluster(RUN_ID, node_uw1, index_ch, genesis_tx,
-                                                         E_schedule, ronda, max_retries=3, timeout=2)
+                                                         E_schedule, ronda, max_retries=3, timeout=2, ea_ctx=ea_ctx)
                         # recived = True
                         # break
                     else:
@@ -324,7 +385,7 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
 #############################
 # Funcion para propagar la tx genesis hacia cada cluster
 # CH -> SN
-def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_schedule, ronda, max_retries=3, timeout=2):
+def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_schedule, ronda, max_retries=3, timeout=2, ea_ctx=None):
     """
     Propaga la Tx Génesis desde el CH a los nodos sincronizados en su cluster con reintentos.
     node_uw: Diccionario de los nodos.
@@ -372,11 +433,30 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
 
                 print(f"CH {ch_node1['NodeID']} enviando Tx genesis (Request_auth) al nodo {node1['NodeID']}, retraso de {delay:.2f} segundos, distancia calculada {dist:.2f}")
 
+                # calculo del tamaño de paquete real  ##
+                if ea_ctx is not None and ea_ctx.get("enabled", False):
+                    scenario = ea_ctx["scenario"]
+                    genesis_tx = _ea_apply_policy_to_auth_tx(
+                        tx=genesis_tx,
+                        sender_node=ch_node1,
+                        ea_ctx=ea_ctx,
+                        epoch=ronda + 1,
+                        per_i=scenario.per,
+                        ret_i=scenario.retransmission_rate,
+                        dag_load_i=scenario.dag_load,
+                        security_risk_i=scenario.security_risk,
+                        message_type="JOIN",
+                    )
+                    packet_size_auth_bits = int(genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
+                else:
+                    packet_size_auth_bits = PACKET_SIZE_AUTH
+                ###
+
                 # guardar la energía antes de actualizar
                 initial_energy_ch_tx = ch_node1["ResidualEnergy"]
                 # Calcular el timeout de espera
                 lat_prop, lat_tx, lat_proc, timeout_ch_to_sn = calculate_timeout(start_position, end_position, 
-                                                                                 bitrate=9200, packet_size=PACKET_SIZE_AUTH)
+                                                                                 bitrate=9200, packet_size=packet_size_auth_bits)
                 # Actualiza energía del nodo
                 ch_node1 = update_energy_node_tdma(ch_node1, node1["Position"], E_schedule,
                                                     timeout_ch_to_sn, type_packet, role='CH', action='tx', 
@@ -385,13 +465,13 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                 energy_consumed_ch_tx = ((initial_energy_ch_tx - ch_node1["ResidualEnergy"]))
                 # print(f'Energy consumed del CH en Tx - Tx-genesis : ', energy_consumed_ch_tx)
 
-                per_ch_to_sn, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, L=PACKET_SIZE_AUTH, 
+                per_ch_to_sn, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, L=packet_size_auth_bits, 
                                                                           bitrate=9200)
 
                 success_auth = propagate_with_probability(per=per_ch_to_sn, override_per=PER_VARIABLE)
                 p_lost_auth = not success_auth
-                bits_sent_auth = PACKET_SIZE_AUTH # bits
-                bits_received_auth = PACKET_SIZE_AUTH if success_auth else 0
+                bits_sent_auth = packet_size_auth_bits # bits
+                bits_received_auth = packet_size_auth_bits if success_auth else 0
 
                 # Se almacena en log_event tx del msj de auth-genesis-sink
                 log_event(
@@ -450,7 +530,7 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                                 continue
 
                             # Se agrega esta linea 08/10/2025
-                            store_ms = ingest_tx(RUN_ID, node1, genesis_tx, add_as_tip=True)
+                            store_ms = ingest_tx(RUN_ID, node1, genesis_tx, add_as_tip=True, ea_ctx=ea_ctx)
 
                             a,b,c = confidence_confirm_tx(RUN_ID, node1, genesis_tx["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
@@ -462,7 +542,8 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                             # time.sleep(1)
 
                             # calular el per
-                            per_sn_gen_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, L=PACKET_SIZE_ACK, bitrate=9200)
+                            per_sn_gen_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
+                                                                                        L=PACKET_SIZE_ACK, bitrate=9200)
 
                             success_gen_ack = propagate_with_probability(per=per_sn_gen_ack, override_per=PER_VARIABLE)
                             p_lost_gen_ack = not success_gen_ack
@@ -598,30 +679,6 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
     return
 
 # ####
-# # Crear la genesis
-# txgenesis = create_gen_block(nodo_sink["NodeID"], nodo_sink["PrivateKey"])
-
-# print(txgenesis)
-
-# pro = propagate_tx_to_ch(nodo_sink, nodo_sink["NeighborCHs"], node_uw, txgenesis, max_retries=3, timeout=2)
-
-# print(pro)
-# #### comentamos 08/10/2025
-# def select_tips(tips, num_tips):
-#     """
-#     Selecciona un número determinado de tips al azar.
-#     Args:
-#         tips (list): Lista de tips disponibles.
-#         num_tips (int): Número de tips que se desea seleccionar.
-#     Returns:
-#         list: Lista con los tips seleccionados.
-#     """
-#     if len(tips) >= num_tips:
-#         selected_tips = random.sample(tips, num_tips)  # Selecciona tips al azar sin repetición
-#     else:
-#         selected_tips = tips  # Si hay menos tips, selecciona todos los disponibles
-#     return selected_tips
-
 
 def find_tip_index(tips, tip_id):
     """
@@ -644,7 +701,7 @@ from copy import deepcopy
 # Funcion para propagar respuesta de los ch al sink
 # CH -> Sink
 # CH -> SN
-def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedule, ronda, max_retries=3, timeout=2):
+def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedule, ronda, ea_ctx=None, max_retries=3, timeout=2):
     """
     Propaga la Tx de respuesta de autenticación desde el CH al Sink y a los nodos de su cluster con reintentos.
     node_ch2: Nodo CH que está propagando la transacción.
@@ -704,9 +761,28 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
             # times_propagation_tx_response = times_propagation_tx_response + (time.time() - start_response_tx_ch)
             # times_propagation_tx_response = delay
 
+            # calculo del tamaño de paquete real  ##
+            if ea_ctx is not None and ea_ctx.get("enabled", False):
+                scenario = ea_ctx["scenario"]
+                response_genesis_tx = _ea_apply_policy_to_auth_tx(
+                    tx=auth_response_tx1,
+                    sender_node=ch_node1,
+                    ea_ctx=ea_ctx,
+                    epoch=ronda + 1,
+                    per_i=scenario.per,
+                    ret_i=scenario.retransmission_rate,
+                    dag_load_i=scenario.dag_load,
+                    security_risk_i=scenario.security_risk,
+                    message_type="JOIN",
+                )
+                packet_size_auth_bits = int(response_genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
+            else:
+                packet_size_auth_bits = PACKET_SIZE_AUTH
+            ###
+
             # calculos de calidad del enlace
             per_resp_auth_ch_sink, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
-                                                                               L=PACKET_SIZE_AUTH, bitrate=9200)
+                                                                               L=packet_size_auth_bits, bitrate=9200)
 
             # CH crea y firma tx de respuesta
             # t_proc_ch_resp_auth = estimate_proc_time_s(do_sign=True, do_tips=True)
@@ -715,14 +791,14 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
             success_resp_auth = propagate_with_probability(per=per_resp_auth_ch_sink, override_per=PER_VARIABLE)
             p_lost_resp_auth = not success_resp_auth
-            bits_sent_resp_auth = PACKET_SIZE_AUTH # bits
-            bits_received_resp_auth = PACKET_SIZE_AUTH if success_resp_auth else 0
+            bits_sent_resp_auth = packet_size_auth_bits # bits
+            bits_received_resp_auth = packet_size_auth_bits if success_resp_auth else 0
 
             # guardar la energía antes de actualizar
             initial_energy_ch_tx = ch_node1["ResidualEnergy"]
             # Calcular el timeout de espera
             lat_prop, lat_tx, _, timeout_ch_resp_auth = calculate_timeout(start_position, end_position, 
-                                                                          bitrate=9200, packet_size=PACKET_SIZE_AUTH, 
+                                                                          bitrate=9200, packet_size=packet_size_auth_bits, 
                                                                           proc_time_s=t_proc_ch_resp_auth)
             # Actualiza energía del nodo
             ch_node1 = update_energy_node_tdma(ch_node1, sink1["Position"], E_schedule,
@@ -796,7 +872,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
                     ## Se comento toda esta parte 14/10/2025
                     # ingest_tx(sink1, auth_response_tx_sink, add_as_tip=True)
-                    store_ms = ingest_tx(RUN_ID, sink1, auth_response_tx1, add_as_tip=True)
+                    store_ms = ingest_tx(RUN_ID, sink1, auth_response_tx1, add_as_tip=True, ea_ctx=ea_ctx)
 
                     a,b,c = confidence_confirm_tx(RUN_ID, sink1, auth_response_tx1["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
@@ -819,6 +895,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
                     
                     while retries_sink < max_retries and not ack_received_CH:
+
                         # calular el per
                         per_sink_ch_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
                                                                                      L=PACKET_SIZE_ACK, bitrate=9200)
@@ -920,18 +997,37 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                     # times_propagation_tx_response = times_propagation_tx_response + (time.time() - start_response_tx_ch)
                     # times_propagation_tx_response = delay
 
+                    # calculo del tamaño de paquete real  ##
+                    if ea_ctx is not None and ea_ctx.get("enabled", False):
+                        scenario = ea_ctx["scenario"]
+                        response_genesis_tx1 = _ea_apply_policy_to_auth_tx(
+                            tx=auth_response_tx1,
+                            sender_node=ch_node1,
+                            ea_ctx=ea_ctx,
+                            epoch=ronda + 1,
+                            per_i=scenario.per,
+                            ret_i=scenario.retransmission_rate,
+                            dag_load_i=scenario.dag_load,
+                            security_risk_i=scenario.security_risk,
+                            message_type="JOIN",
+                        )
+                        packet_size_auth_bits = int(response_genesis_tx1["ea_cost"]["tx_size_bytes"] * 8)
+                    else:
+                        packet_size_auth_bits = PACKET_SIZE_AUTH
+                    ###
+                    
                     per_resp_auth_ch_sn, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
-                                                                                     L=PACKET_SIZE_AUTH, bitrate=9200)
+                                                                                     L=packet_size_auth_bits, bitrate=9200)
                     success_resp_auth = propagate_with_probability(per=per_resp_auth_ch_sn, override_per=PER_VARIABLE)
                     p_lost_resp_auth = not success_resp_auth
-                    bits_sent_resp_auth = PACKET_SIZE_AUTH # bits
-                    bits_received_resp_auth = PACKET_SIZE_AUTH if success_resp_auth else 0
+                    bits_sent_resp_auth = packet_size_auth_bits # bits
+                    bits_received_resp_auth = packet_size_auth_bits if success_resp_auth else 0
 
                     # guardar la energía antes de actualizar
                     initial_energy_ch_tx = ch_node1["ResidualEnergy"]
                     # Calcular el timeout de espera
                     lat_prop, lat_tx, lat_proc, timeout_ch = calculate_timeout(start_position, end_position, 
-                                                                               bitrate=9200, packet_size=PACKET_SIZE_AUTH)
+                                                                               bitrate=9200, packet_size=packet_size_auth_bits)
                     # Actualiza energía del nodo
                     ch_node1 = update_energy_node_tdma(ch_node1, node2["Position"], E_schedule,
                                                         timeout_ch, type_packet, role='CH', action='tx', verbose=VERBOSE)
@@ -1003,7 +1099,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                             # Se actualiza el ID del tip en el nodo, se comenta esta linea 08/10/2025
                             # node2['Tips'].append(auth_response_tx1['ID']) # corregido
                             # Por esta nueva 08/10/2025
-                            store_ms = ingest_tx(RUN_ID, node2, auth_response_tx1, add_as_tip=True)
+                            store_ms = ingest_tx(RUN_ID, node2, auth_response_tx1, add_as_tip=True, ea_ctx=ea_ctx)
 
                             a,b,c = confidence_confirm_tx(RUN_ID, node2, auth_response_tx1["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
@@ -1015,6 +1111,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
                             # break
                             while retries_SNtoCH < max_retries and not ack_received_sntoch:
+                                
                                 # calular el per
                                 per_sn_resp_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist,
                                                                                               L=PACKET_SIZE_ACK, bitrate=9200)
@@ -1154,7 +1251,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
 # Función para propagar la tx de respuesta de los nodos de cada cluster
 # SN -> CH
-def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, max_retries=3, timeout=2):
+def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=None, max_retries=3, timeout=2):
     """
     Función para que los nodos del clúster generen una Tx de autenticación y la envíen al CH.
     nodes: Diccionario con los nodos de la red.
@@ -1200,7 +1297,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, max_retrie
             # Agregar la tx como tips en el nodo, se agrega aqui despues de todo el proceso
             # node4['Tips'].append(node_auth_tx['ID'])    # corregido
             ##### AGREGO LINEA
-            _ = ingest_tx(RUN_ID, node4, node_auth_tx, add_as_tip=True)
+            _ = ingest_tx(RUN_ID, node4, node_auth_tx, add_as_tip=True, ea_ctx=ea_ctx)
             ##############********
 
             # # Actualizar el nodo dentro del cluster
@@ -1222,23 +1319,42 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, max_retrie
 
                 print(f"Nodo {node4['NodeID']} envia Tx Response_auth_to_ch al CH {node_ch['NodeID']}, retraso de {delay:.2f} segundos, distancia calculada {dist:.2f}")
                 # time.sleep(delay)  # Simular el tiempo de sincronización
+                
+                # calculo del tamaño de paquete real  ##
+                if ea_ctx is not None and ea_ctx.get("enabled", False):
+                    scenario = ea_ctx["scenario"]
+                    response_sn_tx = _ea_apply_policy_to_auth_tx(
+                        tx=node_auth_tx,
+                        sender_node=node4,
+                        ea_ctx=ea_ctx,
+                        epoch=ronda + 1,
+                        per_i=scenario.per,
+                        ret_i=scenario.retransmission_rate,
+                        dag_load_i=scenario.dag_load,
+                        security_risk_i=scenario.security_risk,
+                        message_type="JOIN",
+                    )
+                    packet_size_auth_bits = int(response_sn_tx["ea_cost"]["tx_size_bytes"] * 8)
+                else:
+                    packet_size_auth_bits = PACKET_SIZE_AUTH
+                ###
 
                 per_sn_resp_ch, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
-                                                                            L=PACKET_SIZE_AUTH, bitrate=9200)
+                                                                            L=packet_size_auth_bits, bitrate=9200)
                 # SN crea y firma tx de respuesta al CH
                 # t_proc_sn_resp_auth = estimate_proc_time_s(do_sign=True, do_tips=True)
                 t_proc_sn_resp_auth = float(node_auth_tx.get("_proc_ms_tx", 0.0)) / 1000.0
 
                 success_resp_auth = propagate_with_probability(per=per_sn_resp_ch, override_per=PER_VARIABLE)
                 p_lost_resp_auth = not success_resp_auth
-                bits_sent_resp_auth = PACKET_SIZE_AUTH # bits
-                bits_received_resp_auth = PACKET_SIZE_AUTH if success_resp_auth else 0
+                bits_sent_resp_auth = packet_size_auth_bits # bits
+                bits_received_resp_auth = packet_size_auth_bits if success_resp_auth else 0
 
                 # guardar la energía antes de actualizar
                 initial_energy_sn_tx = node4["ResidualEnergy"]
                 # Calcular el timeout de espera
                 lat_prop, lat_tx, _, timeout_sn = calculate_timeout(start_position, end_position, 
-                                                                           bitrate=9200, packet_size=PACKET_SIZE_AUTH, 
+                                                                           bitrate=9200, packet_size=packet_size_auth_bits, 
                                                                            proc_time_s=t_proc_sn_resp_auth)
                 # Actualiza energía del nodo
                 node4 = update_energy_node_tdma(node4, node_ch["Position"], E_schedule,
@@ -1313,7 +1429,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, max_retrie
                                 continue
 
                             # Por esta nueva 0814/10/2025
-                            store_ms = ingest_tx(RUN_ID, node_ch, node_auth_tx, add_as_tip=True)
+                            store_ms = ingest_tx(RUN_ID, node_ch, node_auth_tx, add_as_tip=True, ea_ctx=ea_ctx)
 
                             a,b,c = confidence_confirm_tx(RUN_ID, node_ch, node_auth_tx["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
@@ -1338,6 +1454,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, max_retrie
 
                             ## while
                             while retries_sntoch < max_retries and not authenticated_ack:
+
                                 # confirma la Rx con ACK
                                 # guardar la energía antes de actualizar
                                 per_sn_resp_ack_ch, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, 

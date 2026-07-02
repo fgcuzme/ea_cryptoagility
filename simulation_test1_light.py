@@ -22,9 +22,21 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     PER = os.environ.get("PER_VARIABLE", None)
     SPREADING = os.environ.get("SPREADING", "1.5")
 
+    EA_ENABLED = int(os.environ.get("EA_ENABLED", "0"))
+    EA_SCENARIO_ID = os.environ.get("EA_SCENARIO_ID", "SC1_NORMAL")
+    SCHEME_ID = os.environ.get("SCHEME_ID", "Static_UTangle")
+
+    EA_SCENARIO = SCENARIOS.get(EA_SCENARIO_ID, SCENARIOS["SC1_NORMAL"])
+
     output_dir = output_dir or f"stats/{RUN_ID}/"
     # os.makedirs("stats", exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
+
+    POLICY_KEY = b"EA-CryptoAgility-U-Tangle-policy-key-v1"
+    EA_LOGGER = None
+    if EA_ENABLED:
+        ea_log_path = os.path.join(output_dir, f"ea_policy_events_{RUN_ID}.csv")
+        EA_LOGGER = EAEventLogger(ea_log_path)
 
     with open(os.path.join(output_dir, f"manifest_{RUN_ID}.json"), "w") as f:
     # with open(f"stats/manifest_{RUN_ID}.json","w") as f:
@@ -37,12 +49,33 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
                 "traffic_shipping = 0.5": float(SHIPPING), "wind_mps": float(WIND_SPEED),
                 "spreading": float(SPREADING),
                 "E_init_J": float(ENERGY_INI), "threshold_bateria": float(0.10*float(ENERGY_INI)),
-                "per" : float(PER)
+                "per": float(PER),
+                # "ea_enabled": EA_ENABLED,
+                # "ea_scenario_id": EA_SCENARIO_ID,
+                # "scheme_id": SCHEME_ID
+            },
+            "ea_cryptoagility": {
+                "enabled": bool(EA_ENABLED),
+                "scheme_id": SCHEME_ID,
+                "ea_scenario_id": EA_SCENARIO_ID,
+                "policy_id": "EA_POLICY_V1",
+                "profiles": ["S0", "S1", "S2", "S3", "S4"]
             },
             "start_time": datetime.datetime.utcnow().isoformat(),
             "code_version": "v1.0-main"
         }, f, indent=2)
 
+    ## add ea
+    EA_CTX = {
+        "enabled": bool(EA_ENABLED),
+        "scenario_id": EA_SCENARIO_ID,
+        "scenario": EA_SCENARIO,
+        "scheme_id": SCHEME_ID,
+        "policy_key": POLICY_KEY,
+        "logger": EA_LOGGER,
+        "run_id": RUN_ID,
+        "seed": SEED,
+        }
 
     # %% PARAMETROS INICIALES DE SIMULACIÓN
     import numpy as np
@@ -76,7 +109,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # Estimación de la capacidad de batería necesaria para tus nodos acústicos subacuáticos,
     # basado en las especificaciones del módem S2CR 15/27 (15–27 kHz) y tu perfil de tráfico.
     # Este diseño es ideal para despliegues controlados (12–24 h), como misiones de muestreo
-    #  temporal o experimentación oceanográfica.
+    # temporal o experimentación oceanográfica.
     # Ref: chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.evologics.com/web/content/15634?unique=be7aa65d1c113e56664940ddea7cf65757e6648e
     E0 = float(ENERGY_INI)
     E_init = E0  # Energía inicial realista en julios (≈ 0.9 Ah @ 3.7V)
@@ -123,6 +156,14 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # Crear el nodo Sink
     node_sink = create_sink(0, sink_pos, ed25519_private_key, ed25519_public_key, x25519_private_key, x25519_public_key)
 
+    ### Campos adiconales en el Sink
+    #####
+    node_sink["NodeID"] = node_sink.get("NodeID", 0)
+    node_sink["E_init"] = node_sink.get("E_init", E_init)
+    node_sink["ResidualEnergy"] = node_sink.get("ResidualEnergy", E_init)
+    node_sink["Energy"] = node_sink.get("Energy", node_sink["ResidualEnergy"])
+    node_sink["Role"] = node_sink.get("Role", "Sink")
+
     print("FINAL DE CREACIóN DEL SINK...")
     print('-')
     ################
@@ -138,9 +179,24 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # node_uw = create_num_nodes(num_nodes, pos_nodes, E_init, public_key_sign_sink, public_key_shared_sink)
     node_uw = create_num_nodes_random(num_nodes, pos_nodes, E_init, public_key_sign_sink, public_key_shared_sink)
 
+    ## Agregar campos en los nodos SN
+    ################################
+    for idx, node in enumerate(node_uw):
+        node["NodeID"] = node.get("NodeID", idx + 1)
+        node["E_init"] = node.get("E_init", E_init)
+        node["ResidualEnergy"] = node.get("ResidualEnergy", E_init)
+        node["Energy"] = node.get("Energy", node["ResidualEnergy"])
+        node["Role"] = node.get("Role", "SN")
+
     print("FINAL DE CREACIóN NODOS A DESPLEGAR, CADA UNO ALAMACENA LAS CLAVES PUBLICAS DEL SINK...")
     print('-')
     ######
+
+    ### forzar la baja energía para el escenario SC2
+    if EA_ENABLED and EA_SCENARIO_ID == "SC2_LOW_ENERGY":
+        for node in node_uw:
+            node["ResidualEnergy"] = node["E_init"] * EA_SCENARIO.residual_energy_ratio
+            node["Energy"] = node["ResidualEnergy"]
 
     #%%
     print('-')
@@ -421,12 +477,30 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         txgenesis = create_gen_block(RUN_ID, node_sink["NodeID"], node_sink["PrivateKey_sign"])
         time_createTX = time.time() - timestart
 
+        ## Se agrega esta parte
+        if EA_CTX["enabled"]:
+            txgenesis["message_type"] = "JOIN"
+            txgenesis = attach_policy_to_transaction(
+                tx=txgenesis,
+                node=node_sink,
+                epoch=i + 1,
+                key=EA_CTX["policy_key"],
+                per=EA_SCENARIO.per,
+                retransmission_rate=EA_SCENARIO.retransmission_rate,
+                dag_load=EA_SCENARIO.dag_load,
+                security_risk=EA_SCENARIO.security_risk,
+                invalid_signature_rate=EA_SCENARIO.invalid_signature_rate,
+                downgrade_detected=EA_SCENARIO.downgrade_detected,
+                replay_detected=EA_SCENARIO.replay_detected,
+                suspicious_identity=EA_SCENARIO.suspicious_identity,
+            )
+
         # Se comenta 08/10/2025
         # node_sink["Tips"].append(txgenesis["ID"])   # Agrega la Tx genesis a la lista de tips
         # node_sink['Transactions'].append(txgenesis) # Agrega la Tx genesis a la lsita de Transactions
         # Nuevas lineas
         # Ingerir en el propio sink (autor de la génesis) y dejarla como tip
-        ingest_tx(RUN_ID, node_sink, txgenesis, add_as_tip=True)
+        ingest_tx(RUN_ID, node_sink, txgenesis, add_as_tip=True, ea_ctx=EA_CTX)
 
         # Confirmacion tx
         a,b,c = confidence_confirm_tx(RUN_ID, node_sink, txgenesis, M=20, theta=0.8,
@@ -466,7 +540,8 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         # Este proceso solo se lleva a cabo siempre y cuando los ch esten sincronizados.t
         # Sink -> CH
         # recived, end_time_verify = propagate_tx_to_ch(RUN_ID, node_sink, CH, node_uw, txgenesis, E_schedule, i)
-        propagate_tx_to_ch(RUN_ID, node_sink, CH, node_uw, txgenesis, E_schedule, i)
+        # propagate_tx_to_ch(RUN_ID, node_sink, CH, node_uw, txgenesis, E_schedule, i)
+        propagate_tx_to_ch(RUN_ID, node_sink, CH, node_uw, txgenesis, E_schedule, i, ea_ctx=EA_CTX)
         # stats_proTx["stats_proTx"].update(stats_proTx1)
         # print("Energia consumida hasta ahora : ", stats_proTx)
         # time.sleep(10)
@@ -475,7 +550,8 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         # CH -> Sink
         # CH -> SN
         # end_time_responseCH, end_time_propagationTxCh = propagate_tx_to_sink_and_cluster(RUN_ID, node_sink, CH, node_uw, E_schedule, i)
-        propagate_tx_to_sink_and_cluster(RUN_ID, node_sink, CH, node_uw, E_schedule, i)
+        # propagate_tx_to_sink_and_cluster(RUN_ID, node_sink, CH, node_uw, E_schedule, i)
+        propagate_tx_to_sink_and_cluster(RUN_ID, node_sink, CH, node_uw, E_schedule, i, ea_ctx=EA_CTX)
         # stats_proTx["stats_proTx"].update(stats_proTx2)
         # print("Energia consumida hasta ahora : ", stats_proTx)
         # time.sleep(10)
@@ -484,7 +560,8 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         print('AUTENTICACIÓN DE LOS NODOS DEL CLUSTER')
         # Creación y propagación de la tx de autenticación de los nodos de cada cluster
         # SN -> CH
-        authenticate_nodes_to_ch(RUN_ID, node_uw, CH, E_schedule, i)
+        # authenticate_nodes_to_ch(RUN_ID, node_uw, CH, E_schedule, i)
+        authenticate_nodes_to_ch(RUN_ID, node_uw, CH, E_schedule, i, ea_ctx=EA_CTX)
         # stats_proTx["stats_proTx"].update(stats_proTx3)
         # print("Energia consumida hasta ahora : ", stats_proTx)
         # time.sleep(10)

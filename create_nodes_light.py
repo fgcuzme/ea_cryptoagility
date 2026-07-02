@@ -27,7 +27,7 @@ def create_sink(node_id, position, private_key_sign, public_key_sign, private_ke
         "Transactions": [],  # Transacciones generadas por este nodo
         # Lista de claves públicas de los nodos registrados en la red
         # El campo 'Status' almacenará información sobre si el nodo está autenticado o excluido
-        "RegisterNodes": []  # Estructura con NodeID y Status (IsSyn or IsAuth)
+        "RegisterNodes": [],  # Estructura con NodeID y Status (IsSyn or IsAuth)
     }
     return sink  
 

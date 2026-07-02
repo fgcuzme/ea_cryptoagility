@@ -9,6 +9,8 @@ from collections import deque
 from tangle_logger_light import log_tangle_event, MsTimer
 import msgpack
 
+from ea_cryptoagility.integration_hooks import verify_transaction_policy
+
 ## Establecer variables globales para num_tips=2, check_fresh=True, alpha=0.3, max_steps=200
 
 
@@ -637,9 +639,44 @@ def select_valid_tips(RUN_ID, node, num_tips=2, check_fresh=True, alpha=0.3, max
 
 
 # Mejora aplicada 02/03/202x
-def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True):
+def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
     _ensure_dag_state(node)
     txid = str(tx["ID"])
+
+    #######################
+    # Verifica policy_meta antes de aceptar en DAG
+    if ea_ctx is not None and ea_ctx.get("enabled", False):
+        epoch = int(tx.get("ea_state", {}).get("epoch", 1)) if isinstance(tx.get("ea_state"), dict) else 1
+
+        valid_policy = verify_transaction_policy(
+            tx=tx,
+            node=node,
+            epoch=epoch,
+            key=ea_ctx["policy_key"],
+        )
+
+        if not valid_policy:
+            tx["invalid_policy_meta"] = True
+            tx["downgrade_detected"] = True
+
+            if ea_ctx.get("logger") is not None:
+                from ea_cryptoagility.integration_hooks import log_ea_transaction
+                log_ea_transaction(
+                    logger=ea_ctx["logger"],
+                    run_id=ea_ctx["run_id"],
+                    seed=ea_ctx["seed"],
+                    scenario_id=ea_ctx["scenario_id"],
+                    tx=tx,
+                    latency_ms=0.0,
+                    pdr=0.0,
+                    downgrade_injected=True,
+                    invalid_policy_meta=True,
+                    invalid_tx_rejected=True,
+                )
+
+            return 0.0
+    #########################################
+
     tips_before = len(node["Tips"]) # se agrega
 
     with MsTimer() as t_store:

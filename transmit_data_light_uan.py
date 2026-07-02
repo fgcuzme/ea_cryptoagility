@@ -7,6 +7,11 @@ from energia_dinamica import (calcular_energia_paquete, energy_listen, energy_st
 from per_from_link_uan import per_from_link, propagate_with_probability
 from transmission_logger_uan import log_event
 
+from ea_cryptoagility.integration_hooks import (
+    attach_policy_to_transaction,
+    log_ea_transaction,
+)
+
 global VERBOSE
 
 raw_per = os.environ.get("PER_VARIABLE", None)
@@ -486,7 +491,7 @@ import time
 
 
 def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext, E_schedule,
-                  source='SN', dest='CH', bitrate=9200):
+                  source='SN', dest='CH', bitrate=9200, ea_ctx=None, epoch=1):
     """
     Envío de DATA/AGG entre (SN->CH) y (CH->Sink) con:
     - cifrado ASCON (enc/dec) para medir t_proc,
@@ -559,6 +564,45 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
     # 5) PER del enlace y Bernoulli
     per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate)
+
+    ## Se agrega nuevo
+    if ea_ctx is not None and ea_ctx.get("enabled", False):
+        scenario = ea_ctx["scenario"]
+
+        tx_ea = {
+            "ID": f"DATA-{sender_id}-{receiver_id}-{time.time()}",
+            "Source": sender_id,
+            "Type": "DATA" if source == "SN" else "AGG",
+            "message_type": "TELEMETRY",
+            "Payload": plaintext if isinstance(plaintext, str) else str(plaintext),
+            "ApprovedTx": [],
+        }
+
+        tx_ea = attach_policy_to_transaction(
+            tx=tx_ea,
+            node=sender_id,
+            epoch=epoch,
+            key=ea_ctx["policy_key"],
+            per=per_link,
+            retransmission_rate=scenario.retransmission_rate,
+            dag_load=scenario.dag_load,
+            security_risk=scenario.security_risk,
+            invalid_signature_rate=scenario.invalid_signature_rate,
+            downgrade_detected=scenario.downgrade_detected,
+            replay_detected=scenario.replay_detected,
+            suspicious_identity=scenario.suspicious_identity,
+        )
+
+        bits_sent = int(tx_ea["ea_cost"]["tx_size_bytes"] * 8)
+
+        # Recalcular PER porque el tamaño cambió por policy_meta / payload mode.
+        per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(
+            f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate
+        )
+    else:
+        tx_ea = None
+    ####
+
     success  = propagate_with_probability(per=per_link, override_per=PER_VARIABLE)
     p_lost   = (not success)
     bits_rcv = bits_sent if success else 0
@@ -652,6 +696,24 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ack = simulate_ack_response(sender_node, receiver_node, E_schedule, ack_size_bits=72, bitrate=bitrate,
     #                             sink=(dest=='Sink'))
     
+    ## registro evento ea
+    if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
+        tx_ea["ea_state"]["snr_db"] = snr_db
+
+        log_ea_transaction(
+            logger=ea_ctx["logger"],
+            run_id=ea_ctx["run_id"],
+            seed=ea_ctx["seed"],
+            scenario_id=ea_ctx["scenario_id"],
+            tx=tx_ea,
+            latency_ms=(t_prop_s + t_tx_s + t_enc_s + t_dec_s) * 1000.0,
+            pdr=1.0 if success else 0.0,
+            downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+            invalid_policy_meta=False,
+            invalid_tx_rejected=False,
+        )
+    ###
+
     return encrypted_msg
 
 import struct
