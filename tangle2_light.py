@@ -645,36 +645,82 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
 
     #######################
     # Verifica policy_meta antes de aceptar en DAG
-    if ea_ctx is not None and ea_ctx.get("enabled", False):
-        epoch = int(tx.get("ea_state", {}).get("epoch", 1)) if isinstance(tx.get("ea_state"), dict) else 1
+    # if ea_ctx is not None and ea_ctx.get("enabled", False):
+    #     epoch = int(tx.get("ea_state", {}).get("epoch", 1)) if isinstance(tx.get("ea_state"), dict) else 1
 
-        valid_policy = verify_transaction_policy(
-            tx=tx,
-            node=node,
-            epoch=epoch,
-            key=ea_ctx["policy_key"],
+    #     valid_policy = verify_transaction_policy(
+    #         tx=tx,
+    #         node=node,
+    #         epoch=epoch,
+    #         key=ea_ctx["policy_key"],
+    #     )
+
+    #     if not valid_policy:
+    #         tx["invalid_policy_meta"] = True
+    #         tx["downgrade_detected"] = True
+
+    #         if ea_ctx.get("logger") is not None:
+    #             from ea_cryptoagility.integration_hooks import log_ea_transaction
+    #             log_ea_transaction(
+    #                 logger=ea_ctx["logger"],
+    #                 run_id=ea_ctx["run_id"],
+    #                 seed=ea_ctx["seed"],
+    #                 scenario_id=ea_ctx["scenario_id"],
+    #                 tx=tx,
+    #                 latency_ms=0.0,
+    #                 pdr=0.0,
+    #                 downgrade_injected=True,
+    #                 invalid_policy_meta=True,
+    #                 invalid_tx_rejected=True,
+    #             )
+
+    #         return 0.0
+
+    if ea_ctx is not None and ea_ctx.get("enabled", False):
+
+        has_policy_fields = (
+            isinstance(tx, dict)
+            and isinstance(tx.get("Policy"), dict)
+            and isinstance(tx.get("policy_meta"), dict)
+            and isinstance(tx.get("ea_state"), dict)
         )
 
-        if not valid_policy:
-            tx["invalid_policy_meta"] = True
-            tx["downgrade_detected"] = True
+        if has_policy_fields:
+            epoch = int(tx.get("policy_meta", {}).get("epoch", 1))
 
-            if ea_ctx.get("logger") is not None:
-                from ea_cryptoagility.integration_hooks import log_ea_transaction
-                log_ea_transaction(
-                    logger=ea_ctx["logger"],
-                    run_id=ea_ctx["run_id"],
-                    seed=ea_ctx["seed"],
-                    scenario_id=ea_ctx["scenario_id"],
-                    tx=tx,
-                    latency_ms=0.0,
-                    pdr=0.0,
-                    downgrade_injected=True,
-                    invalid_policy_meta=True,
-                    invalid_tx_rejected=True,
-                )
+            valid_policy = verify_transaction_policy(
+                tx=tx,
+                node=node,
+                epoch=epoch,
+                key=ea_ctx["policy_key"],
+            )
 
-            return 0.0
+            if not valid_policy:
+                tx["invalid_policy_meta"] = True
+                tx["downgrade_detected"] = True
+
+                if ea_ctx.get("logger") is not None:
+                    from ea_cryptoagility.integration_hooks import log_ea_transaction
+
+                    log_ea_transaction(
+                        logger=ea_ctx["logger"],
+                        run_id=ea_ctx["run_id"],
+                        seed=ea_ctx["seed"],
+                        scenario_id=ea_ctx["scenario_id"],
+                        tx=tx,
+                        latency_ms=0.0,
+                        pdr=0.0,
+                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                        invalid_policy_meta=True,
+                        invalid_tx_rejected=True,
+                    )
+
+                return 0.0
+
+        else:
+            # Transacción legacy o aún no instrumentada.
+            # No se rechaza durante la fase de integración.
+            tx["ea_missing_policy_meta"] = True
     #########################################
 
     tips_before = len(node["Tips"]) # se agrega
