@@ -1428,18 +1428,19 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                     )
                 ## log
-                log_ea_transaction(
-                    logger=ea_ctx["logger"],
-                    run_id=ea_ctx["run_id"],
-                    seed=ea_ctx["seed"],
-                    scenario_id=ea_ctx["scenario_id"],
-                    tx=node_auth_tx,
-                    latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
-                    pdr=1.0 if success_resp_auth else 0.0,
-                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                    invalid_policy_meta=False,
-                    invalid_tx_rejected=False,
-                )
+                if ea_ctx is not None and ea_ctx.get("enabled", False) and ea_ctx.get("logger") is not None:
+                    log_ea_transaction(
+                        logger=ea_ctx["logger"],
+                        run_id=ea_ctx["run_id"],
+                        seed=ea_ctx["seed"],
+                        scenario_id=ea_ctx["scenario_id"],
+                        tx=node_auth_tx,
+                        latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
+                        pdr=1.0 if success_resp_auth else 0.0,
+                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                        invalid_policy_meta=False,
+                        invalid_tx_rejected=False,
+                    )
 
                 ## Energia de los demas nodos
                 active_ids = [node_ch["NodeID"], node4["NodeID"]]
@@ -1560,18 +1561,19 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                                     )
 
                                 ## log
-                                log_ea_transaction(
-                                    logger=ea_ctx["logger"],
-                                    run_id=ea_ctx["run_id"],
-                                    seed=ea_ctx["seed"],
-                                    scenario_id=ea_ctx["scenario_id"],
-                                    tx=node_auth_tx,
-                                    latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
-                                    pdr=1.0 if success_resp_auth else 0.0,
-                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                                    invalid_policy_meta=False,
-                                    invalid_tx_rejected=False,
-                                )
+                                if ea_ctx is not None and ea_ctx.get("enabled", False) and ea_ctx.get("logger") is not None:
+                                    log_ea_transaction(
+                                        logger=ea_ctx["logger"],
+                                        run_id=ea_ctx["run_id"],
+                                        seed=ea_ctx["seed"],
+                                        scenario_id=ea_ctx["scenario_id"],
+                                        tx=node_auth_tx,
+                                        latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
+                                        pdr=1.0 if success_resp_auth else 0.0,
+                                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                                        invalid_policy_meta=False,
+                                        invalid_tx_rejected=False,
+                                    )
 
                                 ## Energia de los demas nodos
                                 active_ids = [node_ch["NodeID"], node4["NodeID"]]

@@ -183,6 +183,11 @@ def log_ea_transaction(
     invalid_policy_meta: bool = False,
     invalid_tx_rejected: bool = False,
 ) -> None:
+    
+    # Baseline/static runs do not create an EA logger. Return safely.
+    if logger is None:
+        return
+    
     policy = tx.get("Policy", {})
     meta = tx.get("policy_meta", {})
     state = tx.get("ea_state", {})
