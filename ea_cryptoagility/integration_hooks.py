@@ -39,9 +39,9 @@ def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[f
     Adjust keys if your node structure uses different names.
     """
     residual = (
-        node.get("Energy")
+        node.get("ResidualEnergy")
         or node.get("energy")
-        or node.get("ResidualEnergy")
+        or node.get("Energy")
         or node.get("E_res")
         or node.get("Battery")
         or default_initial

@@ -230,6 +230,7 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                         # agrega nueva linea 08/10/2025
                         store_ms = ingest_tx(RUN_ID, Ch_node, genesis_tx, add_as_tip=True, ea_ctx=ea_ctx)
 
+                        
                         a,b,c = confidence_confirm_tx(RUN_ID, Ch_node, genesis_tx["ID"], M=20, theta=0.8,
                                                         alpha=0.3, max_steps=200, check_fresh=True,
                                                         log=True)                      
@@ -282,6 +283,21 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                                     lat_prop_ms=lat_prop, lat_tx_ms=lat_tx, lat_proc_ms=lat_proc,
                                     snr_db=snr_db, per=per_ch_sink_auth_ack,
                                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
+                                )
+
+                            # log de la operación
+                            if ea_ctx is not None and ea_ctx.get("enabled", False):
+                                log_ea_transaction(
+                                    logger=ea_ctx["logger"],
+                                    run_id=ea_ctx["run_id"],
+                                    seed=ea_ctx["seed"],
+                                    scenario_id=ea_ctx["scenario_id"],
+                                    tx=genesis_tx,
+                                    latency_ms=lat_prop + lat_tx + lat_proc,
+                                    pdr=1.0 if success_auth else 0.0,
+                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                                    invalid_policy_meta=False,
+                                    invalid_tx_rejected=False,
                                 )
 
                             if success_auth_ack:
@@ -578,6 +594,22 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                                     snr_db=snr_db, per=per_sn_gen_ack,
                                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                                     )
+                            
+                            # log de la operación
+                            if ea_ctx is not None and ea_ctx.get("enabled", False):
+                                log_ea_transaction(
+                                    logger=ea_ctx["logger"],
+                                    run_id=ea_ctx["run_id"],
+                                    seed=ea_ctx["seed"],
+                                    scenario_id=ea_ctx["scenario_id"],
+                                    tx=genesis_tx,
+                                    latency_ms=lat_prop + lat_tx + lat_proc,
+                                    pdr=1.0 if success_auth else 0.0,
+                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                                    invalid_policy_meta=False,
+                                    invalid_tx_rejected=False,
+                                )
+
                             # Se actualiza la energia de los demas nodos
                             active_ids = [node1["NodeID"], ch_node1["NodeID"]]
                             active_cluster_id = ch_node1["ClusterHead"]
@@ -680,21 +712,6 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
 
 # ####
 
-def find_tip_index(tips, tip_id):
-    """
-    Encuentra el índice de un tip en la lista basado en su ID.
-    Args:
-        tips (list): Lista de tips, donde cada tip es un diccionario con un campo 'ID'.
-        tip_id (str): El ID del tip que estamos buscando.
-    Returns:
-        int: El índice del tip si se encuentra, o -1 si no se encuentra.
-    """
-    for index, tip in enumerate(tips):
-        if tip["ID"] == tip_id:
-            return index  # Retorna el índice tan pronto como lo encuentra
-    return -1  # Si no encuentra el tip, retorna -1
-
-
 from bbdd2_sqlite3 import load_keys_shared_withou_cipher, load_keys_sign_withou_cipher
 from copy import deepcopy
 
@@ -773,7 +790,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                     ret_i=scenario.retransmission_rate,
                     dag_load_i=scenario.dag_load,
                     security_risk_i=scenario.security_risk,
-                    message_type="JOIN",
+                    message_type="KEY_UPDATE",
                 )
                 packet_size_auth_bits = int(response_genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
             else:
@@ -820,6 +837,21 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                 lat_prop_ms=lat_prop, lat_tx_ms=lat_tx, lat_proc_ms=t_proc_ch_resp_auth*1000.0,
                 snr_db=snr_db, per=per_resp_auth_ch_sink,
                 lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
+                )
+
+            # log de la operación
+            if ea_ctx is not None and ea_ctx.get("enabled", False):
+                log_ea_transaction(
+                    logger=ea_ctx["logger"],
+                    run_id=ea_ctx["run_id"],
+                    seed=ea_ctx["seed"],
+                    scenario_id=ea_ctx["scenario_id"],
+                    tx=auth_response_tx1,
+                    latency_ms=lat_prop + lat_tx + (t_proc_ch_resp_auth*1000.0),
+                    pdr=1.0 if success_resp_auth else 0.0,
+                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                    invalid_policy_meta=False,
+                    invalid_tx_rejected=False,
                 )
 
             ## Energia de los demas nodos
@@ -936,6 +968,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                                 snr_db=snr_db, per=per_sink_ch_ack,
                                 lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                                 )
+                            
                         else:
                             ack_received_CH = False
                             retries_sink += 1
@@ -1009,7 +1042,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                             ret_i=scenario.retransmission_rate,
                             dag_load_i=scenario.dag_load,
                             security_risk_i=scenario.security_risk,
-                            message_type="JOIN",
+                            message_type="KEY_UPDATE",
                         )
                         packet_size_auth_bits = int(response_genesis_tx1["ea_cost"]["tx_size_bytes"] * 8)
                     else:
@@ -1154,6 +1187,21 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                                     snr_db=snr_db, per=per_sn_resp_ack,
                                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                                     )
+                                
+                                # log de la operación
+                                if ea_ctx is not None and ea_ctx.get("enabled", False):
+                                    log_ea_transaction(
+                                        logger=ea_ctx["logger"],
+                                        run_id=ea_ctx["run_id"],
+                                        seed=ea_ctx["seed"],
+                                        scenario_id=ea_ctx["scenario_id"],
+                                        tx=auth_response_tx1,
+                                        latency_ms=lat_prop + lat_tx + lat_proc,
+                                        pdr=1.0 if success_resp_ack else 0.0,
+                                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                                        invalid_policy_meta=False,
+                                        invalid_tx_rejected=False,
+                                    )
 
                                 if success_resp_ack:
                                     ack_received_sntoch = True
@@ -1201,7 +1249,7 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                         initial_energy_sn_rx = node2["ResidualEnergy"]
                         # Calcular el timeout de espera
                         lat_prop, lat_tx, lat_proc, timeout_sn = calculate_timeout(start_position, end_position, 
-                                                                                   bitrate=9200, packet_size=PACKET_SIZE_AUTH, 
+                                                                                   bitrate=9200, packet_size=packet_size_auth_bits, 
                                                                                    proc_time_s=t_proc_ch_resp_auth)
                         # Actualiza energía del nodo
                         node2 = update_energy_node_tdma(node2, ch_node1["Position"], E_schedule,
@@ -1296,9 +1344,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
             ###### VOY A COMENTAR ESTO POR AHORA ***********
             # Agregar la tx como tips en el nodo, se agrega aqui despues de todo el proceso
             # node4['Tips'].append(node_auth_tx['ID'])    # corregido
-            ##### AGREGO LINEA
-            _ = ingest_tx(RUN_ID, node4, node_auth_tx, add_as_tip=True, ea_ctx=ea_ctx)
-            ##############********
+            
 
             # # Actualizar el nodo dentro del cluster
             # update_transactions(node4, node_auth_tx)    # corregido
@@ -1339,6 +1385,10 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                     packet_size_auth_bits = PACKET_SIZE_AUTH
                 ###
 
+                ##### AGREGO LINEA
+                _ = ingest_tx(RUN_ID, node4, node_auth_tx, add_as_tip=True, ea_ctx=ea_ctx)
+                ##############********
+
                 per_sn_resp_ch, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20, distance_m=dist, 
                                                                             L=packet_size_auth_bits, bitrate=9200)
                 # SN crea y firma tx de respuesta al CH
@@ -1377,6 +1427,19 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                     snr_db=snr_db, per=per_sn_resp_ch,
                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                     )
+                ## log
+                log_ea_transaction(
+                    logger=ea_ctx["logger"],
+                    run_id=ea_ctx["run_id"],
+                    seed=ea_ctx["seed"],
+                    scenario_id=ea_ctx["scenario_id"],
+                    tx=node_auth_tx,
+                    latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
+                    pdr=1.0 if success_resp_auth else 0.0,
+                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                    invalid_policy_meta=False,
+                    invalid_tx_rejected=False,
+                )
 
                 ## Energia de los demas nodos
                 active_ids = [node_ch["NodeID"], node4["NodeID"]]
@@ -1496,6 +1559,20 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                                     lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
                                     )
 
+                                ## log
+                                log_ea_transaction(
+                                    logger=ea_ctx["logger"],
+                                    run_id=ea_ctx["run_id"],
+                                    seed=ea_ctx["seed"],
+                                    scenario_id=ea_ctx["scenario_id"],
+                                    tx=node_auth_tx,
+                                    latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
+                                    pdr=1.0 if success_resp_auth else 0.0,
+                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                                    invalid_policy_meta=False,
+                                    invalid_tx_rejected=False,
+                                )
+
                                 ## Energia de los demas nodos
                                 active_ids = [node_ch["NodeID"], node4["NodeID"]]
                                 active_cluster_id = node_ch["ClusterHead"]
@@ -1551,7 +1628,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                         initial_energy_ch_rx = node_ch["ResidualEnergy"]
                         # Calcular el timeout de espera
                         lat_prop, lat_tx, _, timeout_ch = calculate_timeout(start_position, end_position, 
-                                                                                   bitrate=9200, packet_size=PACKET_SIZE_AUTH,
+                                                                                   bitrate=9200, packet_size=packet_size_auth_bits,
                                                                                    proc_time_s=t_proc_ch_recieve)
                         # Actualiza energía del nodo
                         node_ch = update_energy_node_tdma(node_ch, node4["Position"], E_schedule,
@@ -1594,105 +1671,6 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
             if retries == max_retries:
                 print(f"CH {node_ch['NodeID']} no autenticó al Nodo {node4['NodeID']} tras {max_retries} reintentos.")
     return
-
-
-# Nueva función de update_transactions
-import copy
-## comentamos 08/10/2025
-# def update_transactions(node, received_transaction):
-#     """
-#     Actualiza la lista de transacciones del nodo, moviendo Tips a ApprovedTransactions.
-#     Además, trabaja con una copia de la transacción recibida para evitar modificar la original.
-#     node: Diccionario del nodo.
-#     received_transaction: Transacción recibida que contiene detalles de aprobaciones.
-#     """
-#     # print('Nodo que se va a actualizar : ', node["NodeID"])
-
-#     # Hacer una copia profunda de la transacción recibida para evitar modificar la original
-#     transaction_copy = copy.deepcopy(received_transaction)
-
-#     # Extraer ID de la transacción recibida y las aprobaciones
-#     transaction_id = transaction_copy.get("ID")
-#     # approved_tips2 = transaction_copy.get("ApprovedTx", [])
-#     # approved_tips2 = transaction_copy.get("ApprovedTx")
-#     # approved_tips2 = transaction_copy.setdefault("ApprovedTx", [])
-#     # approved_tips2 = received_transaction["ApprovedTx"]
-#     approved_tips2 = list(received_transaction.get("ApprovedTx", []))
-
-#     print('Tips que se deben aprobar 1: ', transaction_copy)
-#     print('Tips que se deben aprobar 2: ', approved_tips2)
-
-#     # Copiar Tips del nodo para iterar sin alterar la lista directamente
-#     tips_to_check = list(node["Tips"])
-
-#     # Verificar las transacciones aprobadas y moverlas
-#     for tip in approved_tips2:
-#         if tip in tips_to_check:
-#             # Mover de Tips a ApprovedTransactions
-#             node["Tips"].remove(tip)  # Eliminar el tip de la lista de Tips del nodo
-#             if tip not in node["ApprovedTransactions"]:  # Prevenir duplicados
-#                 node["ApprovedTransactions"].append(tip)
-
-#     # # Agregar la copia de la transacción recibida al campo "Transactions" del nodo
-#     # if transaction_id not in [tx["ID"] for tx in node["Transactions"]]:
-#     #     node["Transactions"].append(transaction_copy)
-
-#     # La transacción original permanece intacta
-#     # print('Nodo actualizado en ApprovedTransactions:', node["ApprovedTransactions"])
-#     # print('Tips restantes:', node["Tips"])
-
-
-# # comentamos 08/10/2025
-# # Funcion para eliminar la tx
-# def delete_transaction(node, transaction_id):
-#     """
-#     Elimina una transacción del nodo dado su ID.
-
-#     Args:
-#         node (dict): Nodo del que se desea eliminar la transacción.
-#         transaction_id (str): ID de la transacción a eliminar.
-
-#     Returns:
-#         bool: True si la transacción fue eliminada, False si no se encontró.
-#     """
-#     transactions = node.get("Transactions", [])
-
-#     for tx in transactions:
-#         if tx["ID"] == transaction_id:
-#             transactions.remove(tx)
-#             print(f"Transacción con ID {transaction_id} eliminada del nodo {node['NodeID']}.")
-#             return True
-
-#     print(f"Transacción con ID {transaction_id} no encontrada en el nodo {node['NodeID']}.")
-#     return False
-
-# # # comentamos 08/10/2025
-# # Función para busqueda lineal en el diccionario, no puede ser muy eficiente si incrementa el numero de nodos
-# def find_node_index(register_nodes, target_node_id):
-#     """
-#     Busca en la lista 'register_nodes' el nodo cuyo 'NodeID' coincide con 'target_node_id'
-#     y devuelve su índice. Si no se encuentra el nodo, retorna -1.
-
-#     Parámetros:
-#       - register_nodes: lista de diccionarios, cada uno representando un nodo.
-#       - target_node_id: identificador del nodo a buscar (se compara en forma de cadena).
-
-#     Retorna:
-#       - Índice (int) del nodo en la lista, o -1 si no se encontró.
-#     """
-#     # Convertir el target_node_id a cadena para evitar problemas de tipado
-#     target_node_id = str(target_node_id)
-
-#     # print('Register nodes: ', register_nodes)
-#     # print('Target node id : ', target_node_id)
-
-#     # Realiza una búsqueda lineal en la lista
-#     for index, node in enumerate(register_nodes):
-#         # print('Indice : ', index, ' node : ', node)
-#         # time.sleep(5)
-#         if str(node.get("NodeID")) == target_node_id:
-#             return index  # Se retorna el índice tan pronto se encuentra la coincidencia
-#     return -1  # Retorna -1 si no se encontró ningún nodo con el ID especificado
 
 
 # Función para busquedas más rapidas, conviertiendo los indices y el nodoId en un diccionario para busquedas

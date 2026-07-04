@@ -192,6 +192,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     print('-')
     ######
 
+    ### Escenario de ejemplo
     ### forzar la baja energía para el escenario SC2
     if EA_ENABLED and EA_SCENARIO_ID == "SC2_LOW_ENERGY":
         for node in node_uw:
@@ -501,7 +502,22 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         # Nuevas lineas
         # Ingerir en el propio sink (autor de la génesis) y dejarla como tip
         ingest_tx(RUN_ID, node_sink, txgenesis, add_as_tip=True, ea_ctx=EA_CTX)
-
+        
+        # Log
+        if EA_CTX["enabled"]:
+            log_ea_transaction(
+                logger=EA_CTX["logger"],
+                run_id=EA_CTX["run_id"],
+                seed=EA_CTX["seed"],
+                scenario_id=EA_CTX["scenario_id"],
+                tx=txgenesis,
+                latency_ms=time_createTX * 1000.0,
+                pdr=1.0,
+                downgrade_injected=EA_SCENARIO.downgrade_detected,
+                invalid_policy_meta=False,
+                invalid_tx_rejected=False,
+            )
+            
         # Confirmacion tx
         a,b,c = confidence_confirm_tx(RUN_ID, node_sink, txgenesis, M=20, theta=0.8,
                           alpha=0.3, max_steps=200, check_fresh=True,
