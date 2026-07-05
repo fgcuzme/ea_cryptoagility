@@ -602,11 +602,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # 5) PER del enlace y Bernoulli
     per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate)
 
-    ### debug
-    print("DEBUG DATA EA sender_node:", type(sender_node), sender_node.get("NodeID") if isinstance(sender_node, dict) else sender_node)
-    print("DEBUG DATA EA receiver_node:", type(receiver_node), receiver_node.get("NodeID") if isinstance(receiver_node, dict) else receiver_node)
-    time.sleep(3)
-    
+    # ### debug
+    # print("DEBUG DATA EA sender_node:", type(sender_node), sender_node.get("NodeID") if isinstance(sender_node, dict) else sender_node)
+    # print("DEBUG DATA EA receiver_node:", type(receiver_node), receiver_node.get("NodeID") if isinstance(receiver_node, dict) else receiver_node)
+    # time.sleep(3)
+
     ## Se agrega nuevo
     if ea_ctx is not None and ea_ctx.get("enabled", False):
         scenario = ea_ctx["scenario"]
