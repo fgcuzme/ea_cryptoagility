@@ -965,7 +965,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         encrypted_msg = transmit_data(
             RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
             sender, ch_node, str(payload),
-            E_schedule, source='SN', dest='CH'
+            E_schedule, source='SN', dest='CH', ea_ctx=EA_CTX
         )
         # encrypted_str = encrypted_msg.hex()
         # buffer_CH[ch_id-1].append(encrypted_str)
@@ -988,7 +988,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
             transmit_data(
                 RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
                 ch_node, node_sink, datos_agregados,
-                E_schedule, source='CH', dest='Sink'
+                E_schedule, source='CH', dest='Sink', ea_ctx=EA_CTX
             )
             buffer_CH[ch_id-1] = []
             ultimo_envio_CH[ch_id-1] = sim_now

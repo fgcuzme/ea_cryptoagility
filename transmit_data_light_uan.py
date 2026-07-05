@@ -488,10 +488,43 @@ import time
 #         "receiver_node": receiver_node,
 #         "sender_node": sender_node
 #     }
+#
 
+### helper
+def _resolve_node_ref(nodes, node_ref, label="node"):
+    """
+    Converts a node reference into a full node dictionary.
 
+    node_ref may be:
+      - a node dict
+      - a NodeID
+      - a list index
+    """
+
+    if isinstance(node_ref, dict):
+        return node_ref
+
+    node_id_or_index = int(node_ref)
+
+    # 1) Try to resolve by NodeID first
+    for n in nodes:
+        if isinstance(n, dict) and int(n.get("NodeID", -1)) == node_id_or_index:
+            return n
+
+    # 2) Fallback: resolve as list index
+    if 0 <= node_id_or_index < len(nodes):
+        n = nodes[node_id_or_index]
+        if isinstance(n, dict):
+            return n
+
+    raise TypeError(
+        f"{label} must be a node dict, NodeID, or valid index. "
+        f"Received {type(node_ref)} with value {node_ref}"
+    )
+
+## transmitir datos
 def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext, E_schedule,
-                  source='SN', dest='CH', bitrate=9200, ea_ctx=None, epoch=1):
+                  source='SN', dest='CH', ea_ctx=None, bitrate=9200, epoch=1):
     """
     Envío de DATA/AGG entre (SN->CH) y (CH->Sink) con:
     - cifrado ASCON (enc/dec) para medir t_proc,
@@ -500,6 +533,10 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     - logging canónico con log_event (TX y RX),
     - ACK simulado al final del hop.
     """
+    ## helper
+    sender_node = _resolve_node_ref(nodes, sender_node, label="sender_node")
+    receiver_node = _resolve_node_ref(nodes, receiver_node, label="receiver_node")
+
     # 0) Tipo de paquete por hop
     if source == 'SN' and dest == 'CH':
         msg_type = type_packet = 'data'
@@ -565,6 +602,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # 5) PER del enlace y Bernoulli
     per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate)
 
+    ### debug
+    print("DEBUG DATA EA sender_node:", type(sender_node), sender_node.get("NodeID") if isinstance(sender_node, dict) else sender_node)
+    print("DEBUG DATA EA receiver_node:", type(receiver_node), receiver_node.get("NodeID") if isinstance(receiver_node, dict) else receiver_node)
+    time.sleep(3)
+    
     ## Se agrega nuevo
     if ea_ctx is not None and ea_ctx.get("enabled", False):
         scenario = ea_ctx["scenario"]
@@ -580,7 +622,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
         tx_ea = attach_policy_to_transaction(
             tx=tx_ea,
-            node=sender_id,
+            node=sender_node,
             epoch=epoch,
             key=ea_ctx["policy_key"],
             per=per_link,
@@ -632,6 +674,24 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # lat_prop_ms=lat_prop_ms, lat_tx_ms=lat_tx_ms, lat_proc_ms=t_enc_s*1000.0,
         snr_db=snr_db, per=per_link, lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
     )
+
+    ## registro evento ea
+    if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
+        tx_ea["ea_state"]["snr_db"] = snr_db
+
+        log_ea_transaction(
+            logger=ea_ctx["logger"],
+            run_id=ea_ctx["run_id"],
+            seed=ea_ctx["seed"],
+            scenario_id=ea_ctx["scenario_id"],
+            tx=tx_ea,
+            latency_ms=(t_prop_s + t_tx_s + t_enc_s) * 1000.0,
+            pdr=1.0 if success else 0.0,
+            downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+            invalid_policy_meta=False,
+            invalid_tx_rejected=False,
+        )
+    ###
 
     # Se actualiza la energia de los demas nodos
     active_ids = [sender_id, receiver_id]
@@ -695,24 +755,6 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # # 10) ACK hop (usa tu simulador; ya hace logging con log_transmission_event, pero mantenemos consistencia)
     # ack = simulate_ack_response(sender_node, receiver_node, E_schedule, ack_size_bits=72, bitrate=bitrate,
     #                             sink=(dest=='Sink'))
-    
-    ## registro evento ea
-    if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
-        tx_ea["ea_state"]["snr_db"] = snr_db
-
-        log_ea_transaction(
-            logger=ea_ctx["logger"],
-            run_id=ea_ctx["run_id"],
-            seed=ea_ctx["seed"],
-            scenario_id=ea_ctx["scenario_id"],
-            tx=tx_ea,
-            latency_ms=(t_prop_s + t_tx_s + t_enc_s + t_dec_s) * 1000.0,
-            pdr=1.0 if success else 0.0,
-            downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-            invalid_policy_meta=False,
-            invalid_tx_rejected=False,
-        )
-    ###
 
     return encrypted_msg
 

@@ -86,7 +86,6 @@ def run_batch(
                     env["OUTPUT_DIR"] = run_dir
                     Path(run_dir).mkdir(parents=True, exist_ok=True)
 
-
                     env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
                     
                     # Diametro de la red
