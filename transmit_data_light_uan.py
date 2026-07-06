@@ -524,7 +524,7 @@ def _resolve_node_ref(nodes, node_ref, label="node"):
 
 ## transmitir datos
 def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext, E_schedule,
-                  source='SN', dest='CH', ea_ctx=None, bitrate=9200, epoch=1):
+                  source='SN', dest='CH', ea_ctx=None, bitrate=9200, epoch=None):
     """
     Envío de DATA/AGG entre (SN->CH) y (CH->Sink) con:
     - cifrado ASCON (enc/dec) para medir t_proc,

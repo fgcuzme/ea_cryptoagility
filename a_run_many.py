@@ -20,7 +20,7 @@ sink_pos_y = 500
 sink_pos_z = 0
 
 # valor PER
-per = "0.5"  # aquí defines la variable de entorno "None" or "0.15"
+per = "None"  # aquí defines la variable de entorno "None" or "0.15"
 
 # Construir nombre de escenario
 name_scenario = f"{dim_x}m_W{int(wind_speed)}_Sh{shipping}"
