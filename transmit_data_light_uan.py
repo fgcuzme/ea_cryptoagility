@@ -591,6 +591,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     end_pos   = np.array(receiver_node["Position"])
     distance  = float(np.linalg.norm(start_pos - end_pos))
     t_prop_s  = float(propagation_time1(start_pos, end_pos, depth=None, region="standard"))
+    
     if source == 'SN':
         bits_sent = int((len(encrypted_msg) * 8) + (10 * 8)) # se suman los bytes del header paquete datos nodos
     else:
