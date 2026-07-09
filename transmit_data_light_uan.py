@@ -499,6 +499,25 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         policy_meta_bytes = int(ea_cost.get("policy_meta_bytes", 0))
         crypto_proof_bytes = int(ea_cost.get("crypto_proof_bytes", 0))
 
+        checkpoint_k = int(os.environ.get("EA_CHECKPOINT_K", "10"))
+
+        profile_id = tx_ea.get("Policy", {}).get("profile_id", "")
+        checkpoint_rule = tx_ea.get("Policy", {}).get("checkpoint_rule", "")
+
+        # CHECKPOINT_HASH aporta 32 bytes en tu modelo de costes.
+        checkpoint_hash_bytes = 32
+
+        if checkpoint_rule in {"PERIODIC", "BATCHED", "DELAYED_OR_BATCHED"}:
+            if crypto_proof_bytes >= checkpoint_hash_bytes:
+                crypto_proof_bytes = (
+                    crypto_proof_bytes
+                    - checkpoint_hash_bytes
+                    + int((checkpoint_hash_bytes + checkpoint_k - 1) // checkpoint_k)
+                )
+
+        ea_cost["crypto_proof_bytes_effective"] = crypto_proof_bytes
+        ea_cost["checkpoint_amortization_k"] = checkpoint_k
+
         ea_overhead_bits = 8 * (policy_meta_bytes + crypto_proof_bytes)
 
         # Tamaño físico efectivo bajo EA:

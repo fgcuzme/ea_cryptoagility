@@ -33,27 +33,54 @@ def infer_message_type(tx: Dict[str, Any]) -> MessageType:
         return MessageType.TELEMETRY
 
 
+# def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[float, float]:
+#     """
+#     Extract residual and initial energy from UWSNsecure node dicts.
+#     Adjust keys if your node structure uses different names.
+#     """
+#     residual = (
+#         node.get("ResidualEnergy")
+#         or node.get("energy")
+#         or node.get("Energy")
+#         or node.get("E_res")
+#         or node.get("Battery")
+#         or default_initial
+#     )
+#     initial = (
+#         node.get("InitialEnergy")
+#         or node.get("E_init")
+#         or node.get("E0")
+#         or default_initial
+#     )
+#     return float(residual), float(initial)
+
 def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[float, float]:
     """
-    Extract residual and initial energy from UWSNsecure node dicts.
-    Adjust keys if your node structure uses different names.
+    Extract residual and initial energy from UWSNsecure node dictionaries.
+    ResidualEnergy is prioritized because it is updated by the acoustic
+    transmission model.
     """
-    residual = (
-        node.get("ResidualEnergy")
-        or node.get("energy")
-        or node.get("Energy")
-        or node.get("E_res")
-        or node.get("Battery")
-        or default_initial
-    )
-    initial = (
-        node.get("InitialEnergy")
-        or node.get("E_init")
-        or node.get("E0")
-        or default_initial
-    )
-    return float(residual), float(initial)
+    if not isinstance(node, dict):
+        raise TypeError(
+            f"EA-CryptoAgility expected node as dict, got {type(node)} with value {node}"
+        )
 
+    residual_keys = ["ResidualEnergy", "energy", "Energy", "E_res", "Battery"]
+    initial_keys = ["E_init", "InitialEnergy", "E0"]
+
+    residual = default_initial
+    for k in residual_keys:
+        if k in node and node[k] is not None:
+            residual = node[k]
+            break
+
+    initial = default_initial
+    for k in initial_keys:
+        if k in node and node[k] is not None:
+            initial = node[k]
+            break
+
+    return float(residual), float(initial)
 
 def build_state_from_uwsnsecure(
     node: Dict[str, Any],
