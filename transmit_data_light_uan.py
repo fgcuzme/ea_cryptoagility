@@ -235,260 +235,10 @@ from path_loss import propagation_time, compute_path_loss, propagation_time1
 # }
 
 
-# def transmit_data_anterior(db_path, sender_id, receiver_id, plaintext, E_schedule, source='SN', dest='CH'):
-#     # """Simula la transmisión de datos cifrados entre nodos usando claves compartidas almacenadas en la base de datos."""
-#     # conn = sqlite3.connect(db_path)
-#     # cursor = conn.cursor()
-
-#     if source == 'SN' and dest == 'CH':
-#         msg_type = type_packet = 'data'
-#     elif source == 'CH' and dest == 'Sink':
-#         msg_type = type_packet = 'agg'
-#     # else:
-#     #     msg_type = type_packet = 'sync'     # Simula el paquete de ack
-    
-#     energy_consumed_sn = 0
-#     energy_consumed_ch = 0
-#     initial_energy_sn = 0
-#     initial_energy_ch = 0
-
-#     energy_consumed_sn_tx = energy_consumed_sn_rx = 0
-#     energy_consumed_ch_tx = energy_consumed_ch_rx = 0
-#     initial_energy_sn_tx = initial_energy_sn_rx = 0
-#     initial_energy_ch_tx = initial_energy_ch_rx = 0
-
-#     # Obtener la ruta del directorio donde se encuentra el script actual
-#     # current_dir = os.path.dirname(os.path.abspath(__file__))
-#     current_dir = os.getcwd()
-    
-#     # Definir la carpeta donde quieres guardar el archivo (carpeta 'data')
-#     carpeta_destino = os.path.join(current_dir, 'data')
-
-#     # Crea la carpeta en caso de no existir
-#     if not os.path.exists(carpeta_destino):
-#         os.makedirs(carpeta_destino)
-
-#     # Ruta completa del archivo de la base de datos dentro de la carpeta 'data'
-#     ruta_bbdd = os.path.join(carpeta_destino, db_path)
-
-#     conn = sqlite3.connect(ruta_bbdd)
-#     cursor = conn.cursor()
-
-#     sender = sender_id["NodeID"]
-#     receiver = receiver_id["NodeID"]
-
-#     #print("Dentro de la función transmit data : ", sender, "-->", receiver)
-
-#     # Obtener la clave compartida entre los nodos
-#     # cursor.execute("SELECT shared_key FROM shared_keys WHERE node_id = ? AND peer_id = ?", (sender_id, receiver_id)) # accede al dato tipo blob
-#     cursor.execute("SELECT shared_key, id FROM shared_keys WHERE node_id = ? AND peer_id = ?", (int(sender), int(receiver))) # accede al dato tipo int
-#     row = cursor.fetchone()
-#     conn.close()
-
-#     if row:
-#         shared_key = row[0]
-#         shared_key_id = row[1]
-
-#         start_time_enc = time.perf_counter()
-#         encrypted_msg = encrypt_message(shared_key, plaintext)
-#         end_time_enc = time.perf_counter()
-#         time_encryp = end_time_enc - start_time_enc
-#         print(f"📡 {sender} → {receiver} | 🔐 Cifrado: {encrypted_msg.hex()[:20]}...")
-        
-#         start_time_dec = time.perf_counter()
-#         decrypted_msg = decrypt_message(shared_key, encrypted_msg)
-#         end_time_dec = time.perf_counter()
-#         time_descryp = end_time_dec - start_time_dec
-
-#         print(f"📡 {sender} → {receiver} | 📥 Descifrado: {decrypted_msg}")
-        
-#         # Simulación de retardo en la propagación acústica
-#         # distance = np.random.uniform(100, 1000)  # Distancia aleatoria entre nodos
-#         distance = np.linalg.norm(sender_id["Position"] - receiver_id["Position"])  # se debe comentar 10/09/2025
-#         start_position = sender_id["Position"]
-#         end_position = receiver_id["Position"]
-
-#         #delay = propagation_time(distance, start_position, end_position)    # se comenta 10/09/2025
-#         delay = propagation_time1(start_position, end_position, depth=None, region="standard")
-#         print(f"delay of propagation data :  {delay}")
-#         # time.sleep(delay)
-
-#         latency_ms = ((end_time_enc - start_time_enc) + delay + (end_time_dec - start_time_dec) + 0.02) * 1000  # en milisegundos
-#         latency_encryp_ms = ((end_time_enc - start_time_enc) + delay + 0.02) * 1000  # en milisegundos
-#         latency_dec_ms = ( delay + (end_time_dec - start_time_dec) + 0.02) * 1000  # en milisegundos
-
-#         # bits_sent = len(plaintext.encode()) * 8
-#         bits_sent = len(encrypted_msg) * 8
-#         bits_received = len(encrypted_msg) * 8
-        
-#         # Simular pérdida de paquetes
-#         per_data, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=9200)
-#         #success = random.random() > 0.05  # 95% éxito
-
-#         if not per_data:
-#             # p_lost = not success
-#             p_lost = True
-#             print("⚠️ Paquete perdido durante la transmisión simulada", p_lost)
-#         else:
-#             p_lost = False
-
-#         if source == 'SN' and dest == 'CH':
-#             # Energia antes de la trasmisión
-#             # **Nuevo: Medir energía inicial del CH**
-#             initial_energy_sn = sender_id['ResidualEnergy']
-#             print('Energía inicial antes de actualizar el nodo : ', initial_energy_sn)
-
-#             # Calcular el timeout de espera
-#             lat_prop, lat_tx, lat_proc, timeout = calculate_timeout(start_position, end_position, bitrate=9200, 
-#                                                                     packet_size=bits_sent)
-#             sender_id = update_energy_node_tdma(sender_id, receiver_id["Position"], E_schedule, timeout, 
-#                                                 type_packet, role='SN', action='tx', verbose=VERBOSE)
-            
-#             print('Energía del SN despues de tx datos : ', sender_id['ResidualEnergy'])
-            
-#             # energía despues de la trasmisión 
-#             energy_consumed_sn += ((initial_energy_sn - sender_id["ResidualEnergy"]))
-#             print('Energia consumida por el SN en este proceso : ', energy_consumed_sn)
-#             log_transmission_event(sender_id=sender_id['NodeID'], receiver_id=receiver_id['NodeID'], 
-#                                    cluster_id=sender_id["ClusterHead"], distance_m=distance, latency_ms=latency_encryp_ms,
-#                                    bits_sent=bits_sent, bits_received=bits_sent, packet_lost=p_lost, success=per_data,
-#                                    energy_j=energy_consumed_sn, shared_key_id=shared_key_id, msg_type=msg_type)
-        
-#             # Energia antes de la trasmisión
-#             # **Nuevo: Medir energía inicial del CH**
-#             initial_energy_ch = receiver_id['ResidualEnergy']
-#             print('Energía inicial antes de actualizar el CH : ', initial_energy_ch)
-#             # Calcular el timeout de espera
-#             lat_prop, lat_tx, lat_proc, timeout = calculate_timeout(start_position, end_position, bitrate=9200, 
-#                                                                     packet_size=bits_received)
-#             receiver_id = update_energy_node_tdma(receiver_id, sender_id["Position"], E_schedule, timeout, 
-#                                                 type_packet, role='CH', action='rx', verbose=VERBOSE)
-            
-#             # print('Nodo CH : ', receiver_id)
-
-#             print('Energía del CH despues de rx datos : ', receiver_id['ResidualEnergy'])
-#             # energía despues de la trasmisión 
-#             energy_consumed_ch += ((initial_energy_ch - receiver_id["ResidualEnergy"]))
-#             print('Energia consumida por el CH en este proceso :' ,energy_consumed_ch)
-#             log_transmission_event(sender_id=sender_id['NodeID'], receiver_id=receiver_id['NodeID'], 
-#                                 cluster_id=sender_id["ClusterHead"], distance_m=distance, latency_ms=latency_dec_ms,
-#                                     bits_sent=bits_sent, bits_received=bits_received, packet_lost=p_lost, success=per_data,
-#                                     energy_j=energy_consumed_ch, shared_key_id=shared_key_id, msg_type=msg_type)
-            
-#             ack_result = simulate_ack_response(sender_id, receiver_id, E_schedule)
-
-#             if ack_result["ack_success"]:
-#                 print("✅ ACK recibido correctamente")
-#             else:
-#                 print("⚠️ ACK perdido — posible retransmisión")
-
-            
-#         elif source == 'CH' and dest == 'Sink':
-#             # Energia antes de la trasmisión
-#             # **Nuevo: Medir energía inicial del CH**
-#             initial_energy = sender_id['ResidualEnergy']
-#             print('Energía inicial antes de actualizar : ', initial_energy)
-#             # Calcular el timeout de espera
-#             lat_prop, lat_tx, lat_proc, timeout = calculate_timeout(start_position, end_position, bitrate=9200, 
-#                                                                     packet_size=bits_received)
-#             sender_id = update_energy_node_tdma(sender_id, receiver_id["Position"], E_schedule, timeout, 
-#                                                 type_packet, role='CH', action='tx', verbose=VERBOSE)
-            
-#             # energía despues de la trasmisión 
-#             energy_consumed_ch += ((initial_energy - sender_id["ResidualEnergy"]))
-#             print('Energia consumida por el CH : ', energy_consumed_ch)
-#             log_transmission_event(sender_id=sender_id['NodeID'], receiver_id=receiver_id['NodeID'], 
-#                                 cluster_id=sender_id["ClusterHead"], distance_m=distance, latency_ms=latency_encryp_ms,
-#                                     bits_sent=bits_sent, bits_received=bits_sent, packet_lost=p_lost, success=per_data,
-#                                     energy_j=energy_consumed_ch, shared_key_id=shared_key_id, msg_type=msg_type)
-
-#             ack_result = simulate_ack_response(sender_id, receiver_id, E_schedule, sink=True)
-
-#             if ack_result["ack_success"]:
-#                 print("✅ ACK recibido correctamente")
-#             else:
-#                 print("⚠️ ACK perdido — posible retransmisión")
-
-#         # summarize_metrics()
-#         # export_metrics_to_json()  # Puedes especificar otro nombre si lo deseas
-#         # export_metrics_to_csv()
-                                
-#     else:
-#         print(f"🚨 Error: No se encontró clave compartida entre {sender} y {receiver}")
-
-
 import numpy as np
 import random
 import time
 
-# def simulate_ack_response(sender_node, receiver_node, E_schedule, ack_size_bits=72, bitrate=9200, sink=False):
-#     # 1. Calcular distancia
-#     distance = np.linalg.norm(np.array(sender_node["Position"]) - np.array(receiver_node["Position"]))  # se debe comentar 10/09/2025
-
-#     # 2. Simular retardo de propagación
-#     #delay = (propagation_time(distance, receiver_node["Position"], sender_node["Position"]))    # se comenta 10/09/2025
-#     delay = (propagation_time1(receiver_node["Position"], sender_node["Position"], depth=None, region="standard"))
-#     latencia_ms = delay * 1000  # delay en milisegundos
-#     # time.sleep(delay)
-
-#     # 3. Simular pérdida de ACK
-#     per_ack, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=ack_size_bits, bitrate=9200)
-#     # ack_lost = random.random() > 0.95  # 5% de pérdida
-#     # ack_success = not ack_lost
-
-#     if not per_ack:
-#         # p_lost = not success
-#         ack_lost = True
-#         print("⚠️ Paquete perdido durante la transmisión simulada", ack_lost)
-#     else:
-#         ack_lost = False
-
-#     # 4. Timeout basado en distancia y tamaño de ACK
-#     lat_prop, lat_tx, lat_proc, timeout = calculate_timeout(receiver_node["Position"], sender_node["Position"], 
-#                                                             bitrate=bitrate, packet_size=ack_size_bits)
-
-#     # 6. Tiempo estimado del ACK
-#     ack_tx_time = (ack_size_bits / bitrate) * 1000
-#     total_ack_time_ms = latencia_ms + ack_tx_time
-
-#     # 5. Calcular energía para TX (receptor) y RX (emisor)
-#     # ACK va del receptor (CH o Sink) al emisor (SN o CH)
-#     if sink == False:
-#         receiver_initial_energy = receiver_node["ResidualEnergy"]
-#         receiver_node = update_energy_node_tdma(receiver_node, sender_node["Position"], E_schedule, timeout,
-#                                                 type_packet="ack", role="ACK_SENDER", action="tx", verbose=VERBOSE)
-#         E_tx = receiver_initial_energy - receiver_node["ResidualEnergy"]
-
-#         log_transmission_event(sender_id=receiver_node['NodeID'], receiver_id=sender_node['NodeID'], 
-#                                 cluster_id=sender_node["ClusterHead"], distance_m=distance, latency_ms=total_ack_time_ms,
-#                                     bits_sent=ack_size_bits, bits_received=ack_size_bits, packet_lost=ack_lost, success=per_ack,
-#                                     energy_j=E_tx, shared_key_id=None, msg_type="ACK_SENDER")
-#     else:
-#         E_tx = 0
-
-#     sender_initial_energy = sender_node["ResidualEnergy"]
-#     sender_node = update_energy_node_tdma(sender_node, receiver_node["Position"], E_schedule, timeout,
-#                                           type_packet="ack", role="ACK_RECEIVER", action="rx", verbose=VERBOSE)
-#     E_rx = sender_initial_energy - sender_node["ResidualEnergy"]
-
-#     log_transmission_event(sender_id=receiver_node['NodeID'], receiver_id=sender_node['NodeID'], 
-#                                 cluster_id=sender_node["ClusterHead"], distance_m=distance, latency_ms=total_ack_time_ms,
-#                                     bits_sent=ack_size_bits, bits_received=ack_size_bits, packet_lost=ack_lost, success=per_ack,
-#                                     energy_j=E_rx, shared_key_id=None, msg_type="ACK_RECEIVER")
-
-   
-
-#     return {
-#         # "ack_success": ack_success,
-#         "ack_success": per_ack,
-#         "ack_lost": ack_lost,
-#         "ack_latency_s": total_ack_time_ms,
-#         "ack_energy_tx": E_tx,
-#         "ack_energy_rx": E_rx,
-#         "receiver_node": receiver_node,
-#         "sender_node": sender_node
-#     }
-#
 
 ### helper
 def _resolve_node_ref(nodes, node_ref, label="node"):
@@ -521,6 +271,34 @@ def _resolve_node_ref(nodes, node_ref, label="node"):
         f"{label} must be a node dict, NodeID, or valid index. "
         f"Received {type(node_ref)} with value {node_ref}"
     )
+
+## Helper
+def _ea_select_message_type_from_scenario(scenario, default="TELEMETRY"):
+    """
+    Selects the EA message type according to the scenario message mix.
+    This is mainly useful for SC3_DEGRADED_CHANNEL, where emergency alarms
+    should occasionally trigger S4.
+    """
+    import random
+
+    message_mix = getattr(scenario, "message_mix", None)
+
+    if not message_mix:
+        return default
+
+    r = random.random()
+    acc = 0.0
+
+    for mt, prob in message_mix.items():
+        acc += float(prob)
+
+        if r <= acc:
+            if hasattr(mt, "value"):
+                return mt.value
+            return str(mt)
+
+    return default
+
 
 ## transmitir datos
 def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext, E_schedule,
@@ -591,32 +369,112 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     end_pos   = np.array(receiver_node["Position"])
     distance  = float(np.linalg.norm(start_pos - end_pos))
     t_prop_s  = float(propagation_time1(start_pos, end_pos, depth=None, region="standard"))
+
+    #  ## Se agrega nuevo
+    # if ea_ctx is not None and ea_ctx.get("enabled", False):
+    #     scenario = ea_ctx["scenario"]
+
+    #     tx_ea = {
+    #         "ID": f"DATA-{sender_id}-{receiver_id}-{time.time()}",
+    #         "Source": sender_id,
+    #         "Type": "DATA" if source == "SN" else "AGG",
+    #         "message_type": "TELEMETRY",
+    #         "Payload": plaintext if isinstance(plaintext, str) else str(plaintext),
+    #         "ApprovedTx": [],
+    #     }
+
+    #     print("tx_ea Telemetria : ", tx_ea)
+    #     time.sleep(5)
+
+    #     tx_ea = attach_policy_to_transaction(
+    #         tx=tx_ea,
+    #         node=sender_node,
+    #         epoch=epoch,
+    #         key=ea_ctx["policy_key"],
+    #         per=per_link,
+    #         retransmission_rate=scenario.retransmission_rate,
+    #         dag_load=scenario.dag_load,
+    #         security_risk=scenario.security_risk,
+    #         invalid_signature_rate=scenario.invalid_signature_rate,
+    #         downgrade_detected=scenario.downgrade_detected,
+    #         replay_detected=scenario.replay_detected,
+    #         suspicious_identity=scenario.suspicious_identity,
+    #     )
+
+    #     bits_sent = int(tx_ea["ea_cost"]["tx_size_bytes"] * 8)
+
+    #     # Recalcular PER porque el tamaño cambió por policy_meta / payload mode.
+    #     per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(
+    #         f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate
+    #     )
+    # else:
+    #     tx_ea = None
+    # ####
     
+    # if source == 'SN':
+    #     bits_sent = int((len(encrypted_msg) * 8) + (10 * 8)) # se suman los bytes del header paquete datos nodos
+    # else:
+    #     bits_sent = int((len(encrypted_msg) * 8) + (11 * 8)) # se suman los bytes del header paquete agregado
+
+    
+    # # print("bits_sent :", bits_sent)
+    # t_tx_s    = bits_sent / float(bitrate)
+
+    # # 5) PER del enlace y Bernoulli
+    # per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate)
+
+    # # ### debug
+    # # print("DEBUG DATA EA sender_node:", type(sender_node), sender_node.get("NodeID") if isinstance(sender_node, dict) else sender_node)
+    # # print("DEBUG DATA EA receiver_node:", type(receiver_node), receiver_node.get("NodeID") if isinstance(receiver_node, dict) else receiver_node)
+    # # time.sleep(3)
+
+    ## nuevo
+    # 4.1) Tamaño base realmente transmitido: ciphertext ASCON + header
     if source == 'SN':
-        bits_sent = int((len(encrypted_msg) * 8) + (10 * 8)) # se suman los bytes del header paquete datos nodos
+        header_bytes = 10      # header paquete DATA desde sensores
     else:
-        bits_sent = int((len(encrypted_msg) * 8) + (11 * 8)) # se suman los bytes del header paquete agregado
+        header_bytes = 11      # header paquete agregado CH -> Sink
 
-    # print("bits_sent :", bits_sent)
-    t_tx_s    = bits_sent / float(bitrate)
+    normal_bits_sent = int((len(encrypted_msg) * 8) + (header_bytes * 8))
+    bits_sent = normal_bits_sent
 
-    # 5) PER del enlace y Bernoulli
-    per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate)
+    tx_ea = None
+    ea_enabled = (
+        ea_ctx is not None
+        and ea_ctx.get("enabled", False)
+    )
 
-    # ### debug
-    # print("DEBUG DATA EA sender_node:", type(sender_node), sender_node.get("NodeID") if isinstance(sender_node, dict) else sender_node)
-    # print("DEBUG DATA EA receiver_node:", type(receiver_node), receiver_node.get("NodeID") if isinstance(receiver_node, dict) else receiver_node)
-    # time.sleep(3)
+    # PER preliminar con el tamaño base. Sirve como indicador cross-layer
+    # para el motor EA antes de añadir overhead de política.
+    per_link_pre, SL_db, snr_db, EbN0_db, ber = per_from_link(
+        f_khz=20.0,
+        distance_m=distance,
+        L=normal_bits_sent,
+        bitrate=bitrate
+    )
 
-    ## Se agrega nuevo
-    if ea_ctx is not None and ea_ctx.get("enabled", False):
+    if ea_enabled:
         scenario = ea_ctx["scenario"]
+
+        # Para los escenarios sintéticos SC1-SC5, usamos el peor caso entre
+        # el PER físico preliminar y el PER definido por el escenario.
+        # Esto permite que SC3_DEGRADED_CHANNEL active S2/S4 aunque el enlace
+        # físico puntual salga demasiado bueno.
+        policy_per = max(float(per_link_pre), float(getattr(scenario, "per", 0.0)))
+
+        if epoch is None:
+            epoch = 1
+
+        message_type_ea = _ea_select_message_type_from_scenario(
+            scenario,
+            default="TELEMETRY"
+        )
 
         tx_ea = {
             "ID": f"DATA-{sender_id}-{receiver_id}-{time.time()}",
             "Source": sender_id,
             "Type": "DATA" if source == "SN" else "AGG",
-            "message_type": "TELEMETRY",
+            "message_type": message_type_ea,
             "Payload": plaintext if isinstance(plaintext, str) else str(plaintext),
             "ApprovedTx": [],
         }
@@ -626,7 +484,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             node=sender_node,
             epoch=epoch,
             key=ea_ctx["policy_key"],
-            per=per_link,
+            per=policy_per,
             retransmission_rate=scenario.retransmission_rate,
             dag_load=scenario.dag_load,
             security_risk=scenario.security_risk,
@@ -636,15 +494,34 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             suspicious_identity=scenario.suspicious_identity,
         )
 
-        bits_sent = int(tx_ea["ea_cost"]["tx_size_bytes"] * 8)
+        ea_cost = tx_ea.setdefault("ea_cost", {})
 
-        # Recalcular PER porque el tamaño cambió por policy_meta / payload mode.
-        per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(
-            f_khz=20.0, distance_m=distance, L=bits_sent, bitrate=bitrate
-        )
-    else:
-        tx_ea = None
-    ####
+        policy_meta_bytes = int(ea_cost.get("policy_meta_bytes", 0))
+        crypto_proof_bytes = int(ea_cost.get("crypto_proof_bytes", 0))
+
+        ea_overhead_bits = 8 * (policy_meta_bytes + crypto_proof_bytes)
+
+        # Tamaño físico efectivo bajo EA:
+        # ciphertext real + header normal + metadata/proof EA.
+        bits_sent = normal_bits_sent + ea_overhead_bits
+
+        # Guardar trazabilidad para el CSV EA.
+        ea_cost["ciphertext_bytes"] = len(encrypted_msg)
+        ea_cost["header_bytes"] = header_bytes
+        ea_cost["normal_bits_sent"] = normal_bits_sent
+        ea_cost["ea_overhead_bits"] = ea_overhead_bits
+        ea_cost["effective_bits_sent"] = bits_sent
+        ea_cost["tx_size_bytes"] = int((bits_sent + 7) // 8)
+
+    # Tiempo de transmisión y PER final con el tamaño realmente usado.
+    t_tx_s = bits_sent / float(bitrate)
+
+    per_link, SL_db, snr_db, EbN0_db, ber = per_from_link(
+        f_khz=20.0,
+        distance_m=distance,
+        L=bits_sent,
+        bitrate=bitrate
+    )
 
     success  = propagate_with_probability(per=per_link, override_per=PER_VARIABLE)
     p_lost   = (not success)
@@ -676,23 +553,23 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         snr_db=snr_db, per=per_link, lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
     )
 
-    ## registro evento ea
-    if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
-        tx_ea["ea_state"]["snr_db"] = snr_db
+    # ## registro evento ea
+    # if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
+    #     tx_ea["ea_state"]["snr_db"] = snr_db
 
-        log_ea_transaction(
-            logger=ea_ctx["logger"],
-            run_id=ea_ctx["run_id"],
-            seed=ea_ctx["seed"],
-            scenario_id=ea_ctx["scenario_id"],
-            tx=tx_ea,
-            latency_ms=(t_prop_s + t_tx_s + t_enc_s) * 1000.0,
-            pdr=1.0 if success else 0.0,
-            downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-            invalid_policy_meta=False,
-            invalid_tx_rejected=False,
-        )
-    ###
+    #     log_ea_transaction(
+    #         logger=ea_ctx["logger"],
+    #         run_id=ea_ctx["run_id"],
+    #         seed=ea_ctx["seed"],
+    #         scenario_id=ea_ctx["scenario_id"],
+    #         tx=tx_ea,
+    #         latency_ms=(t_prop_s + t_tx_s + t_enc_s) * 1000.0,
+    #         pdr=1.0 if success else 0.0,
+    #         downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+    #         invalid_policy_meta=False,
+    #         invalid_tx_rejected=False,
+    #     )
+    # ###
 
     # Se actualiza la energia de los demas nodos
     active_ids = [sender_id, receiver_id]
@@ -738,6 +615,44 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             E_rx = 0.0
             t_proc_rx_s = 0.0
 
+    # 10) Log EA final, después de conocer TX, RX, PER, PDR y latencia real
+    if ea_enabled and tx_ea is not None and ea_ctx.get("logger") is not None:
+        tx_ea.setdefault("ea_state", {})
+        tx_ea["ea_state"]["snr_db"] = snr_db
+        tx_ea["ea_state"]["per_link"] = per_link
+        tx_ea["ea_state"]["ber"] = ber
+        tx_ea["ea_state"]["distance_m"] = distance
+
+        # En UWSNsecure, E_tx y E_rx están en J porque se registran como energy_j.
+        # En ea_policy_events.csv conviene guardar mJ.
+        crypto_energy_mj = float(tx_ea.get("ea_cost", {}).get("crypto_energy_mj", 0.0))
+        tx_energy_mj = float(E_tx) * 1000.0
+        rx_energy_mj = float(E_rx) * 1000.0
+
+        tx_ea["ea_cost"]["tx_energy_mj"] = tx_energy_mj
+        tx_ea["ea_cost"]["rx_energy_mj"] = rx_energy_mj
+        tx_ea["ea_cost"]["retransmission_energy_mj"] = 0.0
+        tx_ea["ea_cost"]["modem_energy_mj"] = tx_energy_mj + rx_energy_mj
+        tx_ea["ea_cost"]["total_energy_mj"] = (
+            crypto_energy_mj
+            + tx_ea["ea_cost"]["modem_energy_mj"]
+        )
+
+        # print("ea_cost  : ", tx_ea)
+        # time.sleep(3)
+
+        log_ea_transaction(
+            logger=ea_ctx["logger"],
+            run_id=ea_ctx["run_id"],
+            seed=ea_ctx["seed"],
+            scenario_id=ea_ctx["scenario_id"],
+            tx=tx_ea,
+            latency_ms=(t_prop_s + t_tx_s + t_enc_s + t_proc_rx_s) * 1000.0,
+            pdr=1.0 if success else 0.0,
+            downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+            invalid_policy_meta=False,
+            invalid_tx_rejected=False,
+        )
 
     # # 9) Log RX (receptor)
     # log_event(

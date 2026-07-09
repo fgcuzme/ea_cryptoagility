@@ -74,42 +74,6 @@ def _canonical_bytes_for_sig(tx_dict: dict) -> bytes:
     # return json.dumps(view_norm, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return msgpack.packb(view_norm, use_bin_type=True)
 
-# # Se cambia por la función siguiente
-# # Función para verificar la firma de una transacción
-# def verify_transaction_signature(transaction_data, signature, public_key_bytes):
-#     """
-#     ed25519
-#     Verifica la firma de una transacción usando la clave pública.
-
-#     transaction_data: Datos de la transacción (string o numérico).
-#     signature: Firma digital de la transacción (byte array).
-#     public_key_bytes: Clave pública en formato RAW, DER o PEM (byte array).
-
-#     Retorna:
-#     True si la firma es válida, False si no lo es.
-#     """
-#     # Convertir el transaction_id a bytes
-#     if isinstance(transaction_data, int):  # Si es un número, convertir a string
-#         transaction_bytes = str(transaction_data).encode('utf-8')
-#     else:
-#         # Si ya es un string, convertirlo a bytes
-#         transaction_bytes = transaction_data.encode('utf-8')
-
-
-#     # verificar si la clave privada ya es un objeto Ed25519PublicKey
-#     if isinstance(public_key_bytes, ed25519.Ed25519PublicKey):
-#         actual_pulic_key = public_key_bytes
-#     else:
-#         # Cargar la clave pública desde los bytes
-#         actual_pulic_key = ed25519.Ed25519PublicKey.from_public_bytes(public_key_bytes)
-
-#     # Verificar la firma
-
-#     try:
-#         actual_pulic_key.verify(signature, transaction_bytes)
-#         return True  # La firma es válida
-#     except:
-#         return False  # La verificación falló
 
 def verify_transaction_signature(transaction_data, signature, public_key_bytes):
     """
@@ -230,23 +194,7 @@ def generate_unique_id_asconhash(node_id):
     # Retornar el ID único de la transacción
     return digest
 
-### UNa opcion
-# def generate_unique_id_asconhash(node_id, domain=b"U-Tangle:v1", tx_type=b"GEN", round_id=0, extra_nonce=None):
-#     import os, ascon, time
-#     ts = str(int(time.time()*1000)).encode()
-#     rnd = os.urandom(8) if extra_nonce is None else extra_nonce
-#     data = b"|".join([
-#         domain, tx_type, str(node_id).encode(), str(round_id).encode(), ts, rnd
-#     ])
-#     return ascon.hash(data, "Ascon-Hash", 32).hex()
 
-
-# # Ejemplo de uso
-# node_id = 1
-# transaction_id = generate_unique_id_asconhash(node_id)
-# print(f'Transaction ID: {transaction_id}')
-
-# generate_unique_id_asconhash(1)
 
 # Función para crear una transacción en el Tangle
 def create_transaction(RUN_ID, node_id, payload, transaction_type, approvedtips, private_key, selTips_ms=None):
@@ -323,21 +271,6 @@ def create_transaction(RUN_ID, node_id, payload, transaction_type, approvedtips,
 
 # TAMAÑO TX -> 32 + 2 + 2 + 64 + 64 + 32 = 196 bytes = 1568 bits
 # TAMAÑO TX -> 32 + 2 + 2 + 64 + 64 + 20 = 184 bytes = 1472 bits
-#### MEJORA EN LA TX
-# def create_transaction(node_id, node_key_id, private_key, payload, approvedtips, transaction_type=b"DATA", round_id=0):
-#     tx_id = generate_unique_id_asconhash(node_id=node_id, tx_type=transaction_type, round_id=round_id)
-#     transaction = {
-#         "ID": tx_id,
-#         "NodeID": node_id,
-#         "KeyID": node_key_id,           # [ADD]
-#         "Type": transaction_type.decode() if isinstance(transaction_type, (bytes, bytearray)) else transaction_type,  # [ADD]
-#         "Payload": payload,
-#         "ApprovedTx": approvedtips
-#     }
-#     signature = sign_transaction(tx_id, private_key)
-#     transaction["Signature"] = signature
-#     return transaction
-
 
 
 # Función para crear el bloque génesis
