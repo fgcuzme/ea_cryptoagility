@@ -19,18 +19,83 @@ class OperationCost:
     bytes_out: int = 0
 
 
-# Calibrate these values using Raspberry Pi microbenchmarks.
-# They are placeholders for simulation structure, not final claims.
-DEFAULT_OPERATION_COSTS: Dict[str, OperationCost] = {
-    "ASCON_AEAD_ENC": OperationCost(time_ms=0.05, energy_mj=0.01, bytes_out=16),
-    "ASCON_AEAD_DEC": OperationCost(time_ms=0.05, energy_mj=0.01, bytes_out=0),
-    "ED25519_SIGN": OperationCost(time_ms=1.00, energy_mj=0.80, bytes_out=64),
-    "ED25519_VERIFY": OperationCost(time_ms=2.00, energy_mj=1.20, bytes_out=0),
-    "X25519": OperationCost(time_ms=1.50, energy_mj=0.90, bytes_out=32),
-    "POLICY_MAC": OperationCost(time_ms=0.03, energy_mj=0.005, bytes_out=16),
-    "CHECKPOINT_HASH": OperationCost(time_ms=0.02, energy_mj=0.003, bytes_out=32),
-}
+# # Calibrate these values using Raspberry Pi microbenchmarks.
+# # They are placeholders for simulation structure, not final claims.
+# DEFAULT_OPERATION_COSTS: Dict[str, OperationCost] = {
+#     "ASCON_AEAD_ENC": OperationCost(time_ms=0.05, energy_mj=0.01, bytes_out=16),
+#     "ASCON_AEAD_DEC": OperationCost(time_ms=0.05, energy_mj=0.01, bytes_out=0),
+#     "ED25519_SIGN": OperationCost(time_ms=1.00, energy_mj=0.80, bytes_out=64),
+#     "ED25519_VERIFY": OperationCost(time_ms=2.00, energy_mj=1.20, bytes_out=0),
+#     "X25519": OperationCost(time_ms=1.50, energy_mj=0.90, bytes_out=32),
+#     "POLICY_MAC": OperationCost(time_ms=0.03, energy_mj=0.005, bytes_out=16),
+#     "CHECKPOINT_HASH": OperationCost(time_ms=0.02, energy_mj=0.003, bytes_out=32),
+# }
 
+import os
+
+CPU_ACTIVE_POWER_W = float(os.environ.get("EA_CPU_ACTIVE_POWER_W", "0.8"))
+
+
+def energy_from_time_ms(time_ms: float, cpu_power_w: float = CPU_ACTIVE_POWER_W) -> float:
+    """
+    1 W * 1 ms = 1 mJ.
+    Therefore, energy_mj = cpu_power_w * time_ms.
+    """
+    return cpu_power_w * time_ms
+
+# Calibrated from U-Tangle simulation timing statistics.
+# These values represent CPU-side cryptographic/processing cost only.
+# Acoustic TX/RX energy is computed separately by UWSNsecure.
+DEFAULT_OPERATION_COSTS: Dict[str, OperationCost] = {
+    # ASCON values are approximated from DATA processing latency.
+    # They include Python-level encryption/decryption processing overhead.
+    "ASCON_AEAD_ENC": OperationCost(
+        time_ms=3.0092,
+        energy_mj=energy_from_time_ms(3.0092),
+        bytes_out=16,
+    ),
+    "ASCON_AEAD_DEC": OperationCost(
+        time_ms=2.7784,
+        energy_mj=energy_from_time_ms(2.7784),
+        bytes_out=0,
+    ),
+
+    # Ed25519 measured from tangle create/verify events.
+    "ED25519_SIGN": OperationCost(
+        time_ms=1.1709,
+        energy_mj=energy_from_time_ms(1.1709),
+        bytes_out=64,
+    ),
+    "ED25519_VERIFY": OperationCost(
+        time_ms=1.3694,
+        energy_mj=energy_from_time_ms(1.3694),
+        bytes_out=0,
+    ),
+
+    # X25519 was not isolated in the provided timing logs.
+    # Keep as configurable placeholder until a direct microbenchmark is added.
+    "X25519": OperationCost(
+        time_ms=1.5000,
+        energy_mj=energy_from_time_ms(1.5000),
+        bytes_out=32,
+    ),
+
+    # POLICY_MAC was not isolated in the current U-Tangle logs.
+    # Keep lightweight placeholder or replace after HMAC/ASCON-MAC benchmark.
+    "POLICY_MAC": OperationCost(
+        time_ms=0.0300,
+        energy_mj=energy_from_time_ms(0.0300),
+        bytes_out=16,
+    ),
+
+    # Mapped to transaction hash/checkpoint hash.
+    # Important: amortize this cost for PERIODIC/BATCHED checkpoints.
+    "CHECKPOINT_HASH": OperationCost(
+        time_ms=6.6656,
+        energy_mj=energy_from_time_ms(6.6656),
+        bytes_out=32,
+    ),
+}
 
 def operation_counts_for_policy(policy: PolicyTuple) -> Dict[str, int]:
     """
