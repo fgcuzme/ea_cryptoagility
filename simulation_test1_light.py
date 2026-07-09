@@ -583,168 +583,170 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     ## Inicio de tx datos
     ronda_data = 1
 
-    for iter in range(ronda_data):
-        #%%
-        # from transmission_summary_uan import summarize_per_node, summarize_global
+    # for iter in range(ronda_data):
+    #%%
+    # from transmission_summary_uan import summarize_per_node, summarize_global
 
-        ## INICIO PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON
-        print("-")
-        print ('INICIO PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON...')
+    ## INICIO PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON
+    print("-")
+    print ('INICIO PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON...')
 
-        # from transmit_data_test import create_shared_keys_table, generate_shared_keys, transmit_data
-        from transmit_data_light_uan import create_shared_keys_table, generate_shared_keys, transmit_data, encode_marine_payload
+    # from transmit_data_test import create_shared_keys_table, generate_shared_keys, transmit_data
+    from transmit_data_light_uan import create_shared_keys_table, generate_shared_keys, transmit_data, encode_marine_payload
 
-        # Se crea la tabla en la BBDD donde se van a crear las claves compartidas
-        create_shared_keys_table("bbdd_keys_shared_sign_cipher.db")
+    # Se crea la tabla en la BBDD donde se van a crear las claves compartidas
+    create_shared_keys_table("bbdd_keys_shared_sign_cipher.db")
 
-        # 📌 Generar claves compartidas después de la autenticación
-        generate_shared_keys("bbdd_keys_shared_sign_cipher.db", node_uw, CH, node_sink)
+    # 📌 Generar claves compartidas después de la autenticación
+    generate_shared_keys("bbdd_keys_shared_sign_cipher.db", node_uw, CH, node_sink)
 
-        # Parámetros realistas
-        MAX_BUFFER = 5               # número máximo de datos antes de enviar al Sink
-        AGGREGATION_TIMEOUT = 120     # segundos máximo antes de forzar envío
+    # Parámetros realistas
+    MAX_BUFFER = 5               # número máximo de datos antes de enviar al Sink
+    AGGREGATION_TIMEOUT = 120     # segundos máximo antes de forzar envío
 
-        #%%
-        ## Otra forma de ejecutar la simulaión 
-        # =========================
-        # Parámetros de la simulación
-        # =========================
-        SEND_INTERVAL_S = 100           # intervalo fijo entre envíos SN -> CH
-        # SIM_DURATION_S   = 3600         # ej: simulo 1h y proyecto a 24h
-        SIM_DURATION_S   = 600         # ej: simulo 10 y proyecto a 24h
-        # PROJECT_TO_24H   = True
-        PROJECTION_REF_S = 24*3600      # 86400
-        # PROJECTION_FACTOR = (PROJECTION_REF_S / SIM_DURATION_S) if PROJECT_TO_24H else 1.0
-        PROJECTION_FACTOR = (PROJECTION_REF_S / SIM_DURATION_S)
+    #%%
+    ## Otra forma de ejecutar la simulaión 
+    # =========================
+    # Parámetros de la simulación
+    # =========================
+    SEND_INTERVAL_S = 100           # intervalo fijo entre envíos SN -> CH
+    # SIM_DURATION_S   = 3600         # ej: simulo 1h y proyecto a 24h
+    SIM_DURATION_S   = 600         # ej: simulo 10 y proyecto a 24h
+    # PROJECT_TO_24H   = True
+    PROJECTION_REF_S = 24*3600      # 86400
+    # PROJECTION_FACTOR = (PROJECTION_REF_S / SIM_DURATION_S) if PROJECT_TO_24H else 1.0
+    PROJECTION_FACTOR = (PROJECTION_REF_S / SIM_DURATION_S)
 
-        # projected_energy = total_energy * PROJECTION_FACTOR
-        # projected_packets = total_tx * PROJECTION_FACTOR
-        # projected_bits = d["bits_received"].sum() * PROJECTION_FACTOR
+    # projected_energy = total_energy * PROJECTION_FACTOR
+    # projected_packets = total_tx * PROJECTION_FACTOR
+    # projected_bits = d["bits_received"].sum() * PROJECTION_FACTOR
 
-        JITTER_BOOTSTRAP_S = 5          # desfase inicial aleatorio pequeño
-        MAX_BUFFER = 10
-        AGGREGATION_TIMEOUT = 600       # todo en segundos de tiempo simulado
+    JITTER_BOOTSTRAP_S = 5          # desfase inicial aleatorio pequeño
+    MAX_BUFFER = 10
+    AGGREGATION_TIMEOUT = 600       # todo en segundos de tiempo simulado
 
-        def _is_tx_allowed(node) -> bool:
-            return bool(node.get("IsSynced")) and bool(node.get("Authenticated"))
+    def _is_tx_allowed(node) -> bool:
+        return bool(node.get("IsSynced")) and bool(node.get("Authenticated"))
 
-        # Buffers por CH (clave: NodeID del CH) y reloj simulado
-        buffer_CH = {ch_id: [] for ch_id in CH}
-        ultimo_envio_CH = {ch_id: 0.0 for ch_id in CH}  # tiempo SIMULADO
-        sim_now = 0.0
-        sim_end = SIM_DURATION_S
+    # Buffers por CH (clave: NodeID del CH) y reloj simulado
+    buffer_CH = {ch_id: [] for ch_id in CH}
+    ultimo_envio_CH = {ch_id: 0.0 for ch_id in CH}  # tiempo SIMULADO
+    sim_now = 0.0
+    sim_end = SIM_DURATION_S
 
-        # SN elegibles (tienen CH asignado distinto a sí mismos)
-        sn_indices = [
-            i for i, n in enumerate(node_uw)
-            if n.get("ClusterHead") not in (None, n["NodeID"])
-        ]
+    # SN elegibles (tienen CH asignado distinto a sí mismos)
+    sn_indices = [
+        i for i, n in enumerate(node_uw)
+        if n.get("ClusterHead") not in (None, n["NodeID"])
+    ]
 
-        # Agenda de próximos envíos (intervalo FIJO de 100s)
-        next_send_time = {}
-        for i in sn_indices:
-            next_send_time[i] = sim_now + np.random.uniform(0, JITTER_BOOTSTRAP_S)
+    # Agenda de próximos envíos (intervalo FIJO de 100s)
+    next_send_time = {}
+    for i in sn_indices:
+        next_send_time[i] = sim_now + np.random.uniform(0, JITTER_BOOTSTRAP_S)
 
-        # print("next_send_time : ", next_send_time)
-        # time.sleep(10)
+    # print("next_send_time : ", next_send_time)
+    # time.sleep(10)
 
-        MAX_EVENTS = 1_000_000
-        events_processed = 0
+    MAX_EVENTS = 1_000_000
+    events_processed = 0
 
-        while sim_now < sim_end and events_processed < MAX_EVENTS and len(next_send_time) > 0:
-            # 1) próximo evento
-            i_next = min(next_send_time, key=lambda k: next_send_time[k])
-            t_event = next_send_time[i_next]
-            if t_event > sim_end:
-                break
-            sim_now = t_event
+    while sim_now < sim_end and events_processed < MAX_EVENTS and len(next_send_time) > 0:
+        # 1) próximo evento
+        i_next = min(next_send_time, key=lambda k: next_send_time[k])
+        t_event = next_send_time[i_next]
+        if t_event > sim_end:
+            break
+        sim_now = t_event
 
-            sender = node_uw[i_next]
-            ch_id = int(sender["ClusterHead"])
-            ch_node = node_uw[ch_id - 1]
+        sender = node_uw[i_next]
+        ch_id = int(sender["ClusterHead"])
+        ch_node = node_uw[ch_id - 1]
 
-            # 2) filtro: solo SN y su CH si están sync + auth
-            if not (_is_tx_allowed(sender) and _is_tx_allowed(ch_node)):
-                # reprogramar este SN al siguiente intervalo
-                next_send_time[i_next] = sim_now + SEND_INTERVAL_S
-                events_processed += 1
-                continue
-
-            # 3) envío SN -> CH
-            print("El SN envia datos al CH...")
-            # data_str = f"{np.random.uniform(0, 30):.3f}"
-            payload, (temp, salinity, pressure) = encode_marine_payload()
-
-            # print("payload, (temp, salinity, pressure) : ", payload, (temp, salinity, pressure), "Tamaño binario del payload : ", len(payload))
-
-            encrypted_msg = transmit_data(
-                RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
-                sender, ch_node, str(payload),
-                E_schedule, source='SN', dest='CH', ea_ctx=EA_CTX,
-                epoch=iter
-            )
-            # encrypted_str = encrypted_msg.hex()
-            # buffer_CH[ch_id-1].append(encrypted_str)
-            buffer_CH[ch_id-1].append(payload)
-
-            # 4) ¿CH -> Sink? solo si CH sync+auth y toca por buffer/timeout
-            if _is_tx_allowed(ch_node) and (
-                len(buffer_CH[ch_id-1]) >= MAX_BUFFER or (sim_now - ultimo_envio_CH[ch_id-1]) >= AGGREGATION_TIMEOUT
-            ):
-                print("El CH envia datos al Sink...")
-                # datos_agregados = "; ".join(buffer_CH[ch_id-1])
-                # datos_agregados = "; ".join(x.hex() for x in buffer_CH[ch_id-1])
-                datos_agregados = b"".join(buffer_CH[ch_id-1])  # binario puro
-                print("datos_agregados : ", datos_agregados, "len binarios: ", len(datos_agregados))
-
-                # import base64
-                # datos_agregados1 = "; ".join(base64.b64encode(x).decode('utf-8') for x in buffer_CH[ch_id-1])
-                # print("datos_agregados1 : ", datos_agregados1)
-
-                transmit_data(
-                    RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
-                    ch_node, node_sink, datos_agregados,
-                    E_schedule, source='CH', dest='Sink', ea_ctx=EA_CTX,
-                    epoch=iter
-                )
-                buffer_CH[ch_id-1] = []
-                ultimo_envio_CH[ch_id-1] = sim_now
-
-            # 5) reagendar el mismo SN al próximo intervalo fijo
+        # 2) filtro: solo SN y su CH si están sync + auth
+        if not (_is_tx_allowed(sender) and _is_tx_allowed(ch_node)):
+            # reprogramar este SN al siguiente intervalo
             next_send_time[i_next] = sim_now + SEND_INTERVAL_S
             events_processed += 1
+            continue
 
-        # # 6) flush final (lo que quede en buffers), solo CH sync+auth
-        # for ch_id in CH:
-        #     if buffer_CH[ch_id]:
-        #         ch_node = node_uw[ch_id - 1]
-        #         if _is_tx_allowed(ch_node):
-        #             datos_agregados = "; ".join(buffer_CH[ch_id])
-        #             transmit_data(
-        #                 RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
-        #                 ch_node, node_sink, datos_agregados,
-        #                 E_schedule, source='CH', dest='Sink'
-        #             )
-        #         buffer_CH[ch_id] = []
-        #         ultimo_envio_CH[ch_id] = sim_now
+        # 3) envío SN -> CH
+        print("El SN envia datos al CH...")
+        # data_str = f"{np.random.uniform(0, 30):.3f}"
+        payload, (temp, salinity, pressure) = encode_marine_payload()
 
-        # Resumen y PROYECCIÓN
-        # summarize_per_node()
-        # summarize_global()
+        # print("payload, (temp, salinity, pressure) : ", payload, (temp, salinity, pressure), "Tamaño binario del payload : ", len(payload))
 
-        print(f"\n--- Proyección a 24h ---")
-        print(f"Ventana simulada: {SIM_DURATION_S/3600:.2f} h; factor F = {PROJECTION_FACTOR:.2f}")
-        print("Multiplica: energía total, nº de paquetes y bits por F. Latencias por paquete NO se escalan.")
+        encrypted_msg = transmit_data(
+            RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
+            sender, ch_node, str(payload),
+            E_schedule, source='SN', dest='CH', ea_ctx=EA_CTX,
+            epoch=events_processed+1
+        )
+        # encrypted_str = encrypted_msg.hex()
+        # buffer_CH[ch_id-1].append(encrypted_str)
+        buffer_CH[ch_id-1].append(payload)
 
-        #%%
+        # 4) ¿CH -> Sink? solo si CH sync+auth y toca por buffer/timeout
+        if _is_tx_allowed(ch_node) and (
+            len(buffer_CH[ch_id-1]) >= MAX_BUFFER or (sim_now - ultimo_envio_CH[ch_id-1]) >= AGGREGATION_TIMEOUT
+        ):
+            print("El CH envia datos al Sink...")
+            # datos_agregados = "; ".join(buffer_CH[ch_id-1])
+            # datos_agregados = "; ".join(x.hex() for x in buffer_CH[ch_id-1])
+            datos_agregados = b"".join(buffer_CH[ch_id-1])  # binario puro
+            print("datos_agregados : ", datos_agregados, "len binarios: ", len(datos_agregados))
 
-        print("-")
-        print ('FIN PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON...')
-        #%%
+            # import base64
+            # datos_agregados1 = "; ".join(base64.b64encode(x).decode('utf-8') for x in buffer_CH[ch_id-1])
+            # print("datos_agregados1 : ", datos_agregados1)
 
-        # %%
-        #%%
-        ## fin del proceso de transmisión de datos
+            transmit_data(
+                RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
+                ch_node, node_sink, datos_agregados,
+                E_schedule, source='CH', dest='Sink', ea_ctx=EA_CTX,
+                epoch=events_processed+1
+            )
+            buffer_CH[ch_id-1] = []
+            ultimo_envio_CH[ch_id-1] = sim_now
+
+        # 5) reagendar el mismo SN al próximo intervalo fijo
+        next_send_time[i_next] = sim_now + SEND_INTERVAL_S
+        events_processed += 1
+
+    # # 6) flush final (lo que quede en buffers), solo CH sync+auth
+    # for ch_id in CH:
+    #     if buffer_CH[ch_id]:
+    #         ch_node = node_uw[ch_id - 1]
+    #         if _is_tx_allowed(ch_node):
+    #             datos_agregados = "; ".join(buffer_CH[ch_id])
+    #             transmit_data(
+    #                 RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
+    #                 ch_node, node_sink, datos_agregados,
+    #                 E_schedule, source='CH', dest='Sink'
+    #             )
+    #         buffer_CH[ch_id] = []
+    #         ultimo_envio_CH[ch_id] = sim_now
+
+    # Resumen y PROYECCIÓN
+    # summarize_per_node()
+    # summarize_global()
+
+    print(f"\n--- Proyección a 24h ---")
+    print(f"Ventana simulada: {SIM_DURATION_S/3600:.2f} h; factor F = {PROJECTION_FACTOR:.2f}")
+    print("Multiplica: energía total, nº de paquetes y bits por F. Latencias por paquete NO se escalan.")
+
+    #%%
+
+    print("-")
+    print ('FIN PROCESO DE TRANSMISIÓN DE DATOS CIFRADOS CON ASCON...')
+    #%%
+
+    # %%
+    #%%
+    ## fin del proceso de transmisión de datos
+
+    ### for
 
     # sumarización de run
     from transmission_summary_uan import summarize_global_by_run, summarize_per_node_by_run
