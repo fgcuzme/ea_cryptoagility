@@ -301,6 +301,9 @@ def _ea_select_message_type_from_scenario(scenario, default="TELEMETRY"):
 
 
 ## transmitir datos
+from ea_cryptoagility.ea_crypto_costs import DEFAULT_OPERATION_COSTS
+import math
+
 def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext, E_schedule,
                   source='SN', dest='CH', ea_ctx=None, bitrate=9200, epoch=None):
     """
@@ -499,24 +502,130 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         policy_meta_bytes = int(ea_cost.get("policy_meta_bytes", 0))
         crypto_proof_bytes = int(ea_cost.get("crypto_proof_bytes", 0))
 
-        checkpoint_k = int(os.environ.get("EA_CHECKPOINT_K", "10"))
+        checkpoint_rule = tx_ea.get("Policy", {}).get("checkpoint_rule", "")
 
         profile_id = tx_ea.get("Policy", {}).get("profile_id", "")
         checkpoint_rule = tx_ea.get("Policy", {}).get("checkpoint_rule", "")
 
-        # CHECKPOINT_HASH aporta 32 bytes en tu modelo de costes.
-        checkpoint_hash_bytes = 32
+        K_PERIODIC = int(os.environ.get("EA_CHECKPOINT_K_PERIODIC", "10"))
+        K_BATCHED = int(os.environ.get("EA_CHECKPOINT_K_BATCHED", "25"))
+        K_DELAYED = int(os.environ.get("EA_CHECKPOINT_K_DELAYED", "30"))
 
-        if checkpoint_rule in {"PERIODIC", "BATCHED", "DELAYED_OR_BATCHED"}:
-            if crypto_proof_bytes >= checkpoint_hash_bytes:
+        ck = DEFAULT_OPERATION_COSTS["CHECKPOINT_HASH"]
+        ck_bytes = int(ck.bytes_out)
+        ck_energy_mj = float(ck.energy_mj)
+        ck_time_ms = float(ck.time_ms)
+
+        ascon_enc = DEFAULT_OPERATION_COSTS["ASCON_AEAD_ENC"]
+        policy_mac = DEFAULT_OPERATION_COSTS["POLICY_MAC"]
+
+        min_secure_data_energy_mj = (
+            float(ascon_enc.energy_mj)
+            + float(policy_mac.energy_mj)
+        )
+
+        min_secure_data_time_ms = (
+            float(ascon_enc.time_ms)
+            + float(policy_mac.time_ms)
+        )
+
+        crypto_proof_bytes = int(ea_cost.get("crypto_proof_bytes", 0))
+        crypto_energy_mj = float(ea_cost.get("crypto_energy_mj", 0.0))
+        crypto_time_ms = float(ea_cost.get("crypto_time_ms", 0.0))
+
+        if profile_id == "S1" and checkpoint_rule == "PERIODIC":
+            K = max(1, K_PERIODIC)
+
+            # S1 periodic: replace full checkpoint cost by amortized checkpoint cost.
+            if crypto_proof_bytes >= ck_bytes:
                 crypto_proof_bytes = (
                     crypto_proof_bytes
-                    - checkpoint_hash_bytes
-                    + int((checkpoint_hash_bytes + checkpoint_k - 1) // checkpoint_k)
+                    - ck_bytes
+                    + int(math.ceil(ck_bytes / K))
                 )
 
-        ea_cost["crypto_proof_bytes_effective"] = crypto_proof_bytes
-        ea_cost["checkpoint_amortization_k"] = checkpoint_k
+                crypto_energy_mj = (
+                    crypto_energy_mj
+                    - ck_energy_mj
+                    + ck_energy_mj / K
+                )
+
+                crypto_time_ms = (
+                    crypto_time_ms
+                    - ck_time_ms
+                    + ck_time_ms / K
+                )
+            else:
+                # If the full checkpoint was not explicitly encoded, add an amortized checkpoint.
+                crypto_proof_bytes += int(math.ceil(ck_bytes / K))
+                crypto_energy_mj += ck_energy_mj / K
+                crypto_time_ms += ck_time_ms / K
+
+        elif profile_id == "S1" and checkpoint_rule == "BATCHED":
+            K = max(1, K_BATCHED)
+
+            # S1 batched: same mechanism as periodic, but with a larger K.
+            if crypto_proof_bytes >= ck_bytes:
+                crypto_proof_bytes = (
+                    crypto_proof_bytes
+                    - ck_bytes
+                    + int(math.ceil(ck_bytes / K))
+                )
+
+                crypto_energy_mj = (
+                    crypto_energy_mj
+                    - ck_energy_mj
+                    + ck_energy_mj / K
+                )
+
+                crypto_time_ms = (
+                    crypto_time_ms
+                    - ck_time_ms
+                    + ck_time_ms / K
+                )
+            else:
+                crypto_proof_bytes += int(math.ceil(ck_bytes / K))
+                crypto_energy_mj += ck_energy_mj / K
+                crypto_time_ms += ck_time_ms / K
+
+        elif profile_id == "S2" and checkpoint_rule == "DELAYED_OR_BATCHED":
+            K = max(1, K_DELAYED)
+
+            # S2 must remain secure: ASCON-AEAD + policy MAC are mandatory.
+            # The checkpoint is delayed/batched, so only an amortized checkpoint
+            # cost is added per packet.
+            crypto_proof_bytes += int(math.ceil(ck_bytes / K))
+            crypto_energy_mj += ck_energy_mj / K
+            crypto_time_ms += ck_time_ms / K
+
+            crypto_energy_mj = max(
+                crypto_energy_mj,
+                min_secure_data_energy_mj + ck_energy_mj / K
+            )
+
+            crypto_time_ms = max(
+                crypto_time_ms,
+                min_secure_data_time_ms + ck_time_ms / K
+            )
+
+        # Safety floor: active secure profiles must never have zero crypto cost.
+        if profile_id in {"S0", "S1", "S2", "S3", "S4"}:
+            crypto_energy_mj = max(crypto_energy_mj, 1e-6)
+            crypto_time_ms = max(crypto_time_ms, 1e-6)
+
+        ea_cost["crypto_proof_bytes"] = int(crypto_proof_bytes)
+        ea_cost["crypto_proof_bytes_effective"] = int(crypto_proof_bytes)
+        ea_cost["crypto_energy_mj"] = float(crypto_energy_mj)
+        ea_cost["crypto_time_ms"] = float(crypto_time_ms)
+
+        if checkpoint_rule == "PERIODIC":
+            ea_cost["checkpoint_amortization_k"] = K_PERIODIC
+        elif checkpoint_rule == "BATCHED":
+            ea_cost["checkpoint_amortization_k"] = K_BATCHED
+        elif checkpoint_rule == "DELAYED_OR_BATCHED":
+            ea_cost["checkpoint_amortization_k"] = K_DELAYED
+        else:
+            ea_cost["checkpoint_amortization_k"] = 1
 
         ea_overhead_bits = 8 * (policy_meta_bytes + crypto_proof_bytes)
 

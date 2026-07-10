@@ -156,7 +156,8 @@ def attach_policy_to_transaction(
     tx["ea_state"] = state.as_dict()
 
     # Update optional cost fields.
-    cost = estimate_total_transaction_cost(policy, retransmissions=int(round(retransmission_rate)))
+    # cost = estimate_total_transaction_cost(policy, retransmissions=int(round(retransmission_rate)))
+    cost = estimate_total_transaction_cost(policy, retransmissions=0)
     tx["ea_cost"] = cost
     return tx
 

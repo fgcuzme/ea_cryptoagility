@@ -39,6 +39,14 @@ EA_SCENARIOS = [
     "SC5_DAG_CONGESTION",
 ]
 
+PER_BY_SCENARIO = {
+    "SC1_NORMAL": "None",
+    "SC2_LOW_ENERGY": "None",
+    "SC3_DEGRADED_CHANNEL": "0.25",
+    "SC4_HIGH_RISK": "None",
+    "SC5_DAG_CONGESTION": "None",
+}
+
 # Modos de comparación
 # 0 = Static U-Tangle baseline
 # 1 = EA-CryptoAgility U-Tangle
@@ -86,7 +94,8 @@ def run_batch(
                     env["OUTPUT_DIR"] = run_dir
                     Path(run_dir).mkdir(parents=True, exist_ok=True)
 
-                    env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
+                    # env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
+                    env["PER_VARIABLE"] = PER_BY_SCENARIO.get(ea_scenario_id, "None")
                     
                     # Diametro de la red
                     env["DIM_X"] = str(dim_x)
