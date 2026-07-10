@@ -1,3 +1,4 @@
+from pathlib import Path
 from setuptools import setup
 from Cython.Build import cythonize
 
@@ -22,6 +23,13 @@ source_files = [
     "transmission_summary_uan.py",
     "transmit_data_light_uan.py"
 ]
+
+ea_modules = [
+    str(p) for p in Path("ea_cryptoagility").glob("*.py")
+    if p.name != "__init__.py"
+]
+
+source_files.extend(ea_modules)
 
 setup(
     ext_modules=cythonize(
