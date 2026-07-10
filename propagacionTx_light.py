@@ -17,6 +17,8 @@ from ea_cryptoagility.integration_hooks import (
     log_ea_transaction,
 )
 
+from ea_cryptoagility.ea_crypto_costs import estimate_modem_energy_mj
+
 global VERBOSE
 
 raw_per = os.environ.get("PER_VARIABLE", None)
@@ -78,6 +80,128 @@ def _ea_apply_policy_to_auth_tx(
         suspicious_identity=scenario.suspicious_identity,
     )
 
+    # Important:
+    # For U-Tangle authentication/control packets, avoid double-counting
+    # Ed25519 signature and checkpoint bytes. The baseline AUTH packet already
+    # contains the core signed transaction fields.
+    tx = _ea_apply_auth_packet_size_model(
+        tx=tx,
+        message_type=message_type,
+        bitrate_bps=9200.0,
+        p_tx_w=2.0,
+        p_rx_w=0.75,
+    )
+
+    return tx
+
+def _ea_apply_auth_packet_size_model(
+    tx,
+    message_type="JOIN",
+    bitrate_bps=9200.0,
+    p_tx_w=2.0,
+    p_rx_w=0.75,
+):
+    """
+    Adjusts the EA packet-size model for U-Tangle authentication/control
+    transactions.
+
+    The baseline U-Tangle AUTH transaction already includes the Ed25519
+    signature, parent references, timestamp, nonce and payload fields.
+    Therefore, EA-CryptoAgility must not add another full Ed25519 signature
+    to the transmitted size unless a new signature is explicitly transmitted
+    as an additional field.
+
+    Size model:
+        L_auth_EA = L_auth_U-Tangle + L_policy_meta + L_rekey_optional
+
+    Default:
+        L_auth_U-Tangle = 185 bytes = PACKET_SIZE_AUTH / 8
+        L_policy_meta   = 25 bytes
+        L_rekey         = 0 by default, or 32 bytes if explicitly enabled
+    """
+
+    if not isinstance(tx, dict):
+        return tx
+
+    ea_cost = tx.get("ea_cost")
+    if not isinstance(ea_cost, dict):
+        return tx
+
+    policy = tx.get("Policy", {})
+    if not isinstance(policy, dict):
+        policy = {}
+
+    # Base AUTH size from the published U-Tangle model:
+    # PACKET_SIZE_AUTH = 1480 bits = 185 bytes.
+    base_auth_bytes = int(os.environ.get(
+        "EA_AUTH_BASE_BYTES",
+        str(PACKET_SIZE_AUTH // 8)
+    ))
+
+    # Compact binary policy metadata.
+    policy_meta_bytes = int(ea_cost.get(
+        "policy_meta_bytes",
+        int(os.environ.get("EA_POLICY_META_BYTES", "25"))
+    ))
+
+    # By default, do NOT add X25519 bytes to every AUTH packet.
+    # Only add them if you explicitly want to model transmitted rekey material.
+    rekey_bytes = 0
+    rekey_rule = str(policy.get("rekey_rule", ""))
+
+    include_rekey = int(os.environ.get("EA_AUTH_INCLUDE_REKEY_BYTES", "0"))
+
+    if include_rekey == 1 and rekey_rule in {
+        "REQUIRED_IF_APPLICABLE",
+        "ADAPTIVE_REKEY",
+    }:
+        rekey_bytes = int(os.environ.get("EA_AUTH_REKEY_BYTES", "32"))
+
+    # For AUTH/control Tangle transactions, do not add an extra checkpoint hash
+    # by default. The transaction itself is already signed/checkpointed in the DAG.
+    checkpoint_bytes = 0
+
+    auth_size_bytes = (
+        base_auth_bytes
+        + policy_meta_bytes
+        + rekey_bytes
+        + checkpoint_bytes
+    )
+
+    # Optional safety cap to avoid acoustic fragmentation.
+    # Set EA_AUTH_LMAX_BYTES=256 if you want to enforce one-frame AUTH packets.
+    lmax_auth_bytes = int(os.environ.get("EA_AUTH_LMAX_BYTES", "0"))
+
+    if lmax_auth_bytes > 0:
+        auth_size_bytes = min(auth_size_bytes, lmax_auth_bytes)
+
+    # Update communication-size fields.
+    ea_cost["auth_base_bytes"] = base_auth_bytes
+    ea_cost["auth_policy_meta_bytes"] = policy_meta_bytes
+    ea_cost["auth_rekey_bytes"] = rekey_bytes
+    ea_cost["auth_checkpoint_bytes"] = checkpoint_bytes
+    ea_cost["auth_size_model"] = "UTANGLE_BASE_PLUS_POLICY_META"
+    ea_cost["tx_size_bytes"] = int(auth_size_bytes)
+
+    # Recompute simplified modem-energy estimate for consistency in EA logs.
+    modem = estimate_modem_energy_mj(
+        tx_size_bytes=auth_size_bytes,
+        bitrate_bps=bitrate_bps,
+        p_tx_w=p_tx_w,
+        p_rx_w=p_rx_w,
+        rx_count=1,
+        retransmissions=0,
+    )
+
+    ea_cost.update(modem)
+
+    crypto_energy_mj = float(ea_cost.get("crypto_energy_mj", 0.0))
+    ea_cost["total_energy_mj"] = crypto_energy_mj + float(
+        ea_cost.get("modem_energy_mj", 0.0)
+    )
+
+    tx["ea_cost"] = ea_cost
+
     return tx
 
 # import pickle
@@ -94,30 +218,6 @@ def _ea_apply_policy_to_auth_tx(
 # # print(nodo_sink)
 # Consideramos un escenario ideal donde todas las Tx llegan a su destino
 # success_rate = 0
-
-# Se comenta para mejoras
-# # # def propagate_with_probability(success_rate = 0):
-# # #     """
-# # #     Simula la probabilidad de éxito de la propagación de una transacción.
-# # #     Parameters:
-# # #     success_rate: Probabilidad de éxito en la propagación de la transacción (por defecto 80%).
-# # #     Returns:
-# # #     True si la propagación es exitosa (según el valor aleatorio y la tasa de éxito), False en caso contrario.
-# # #     """
-# # #     return random.random() > success_rate
-
-## Sugenrencia de update_transactios
-# def update_transactions(node, received_transaction):
-#     """
-#     Mueve tips aprobados a 'ApprovedTransactions' y añade la tx recibida como nueva tip.
-#     Evita duplicados.
-#     """
-#     tx_id = received_transaction.get("ID")
-#     approved = list(received_transaction.get("ApprovedTx", []))
-#     for tip in approved:
-#         tips_remove(node, tip)
-#         approved_add(node, tip)
-#    tips_add(node, tx_id)
 
 
 table_events = []

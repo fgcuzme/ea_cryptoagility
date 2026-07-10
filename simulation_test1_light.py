@@ -431,7 +431,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     print("-")
     print("INCIO PROCESO DE AUTENTICACIÓN BASADO EN TX")
 
-    from propagacionTx_light import propagate_tx_to_ch, authenticate_nodes_to_ch, propagate_tx_to_sink_and_cluster
+    from propagacionTx_light import propagate_tx_to_ch, authenticate_nodes_to_ch, propagate_tx_to_sink_and_cluster, _ea_apply_policy_to_auth_tx
     from tangle2_light import create_gen_block, delete_tangle, ingest_tx, confidence_confirm_tx
     import time
     # from save_csv import save_stats_tx, save_stats_energy_proTx_csv, save_stats_to_csv, save_stats_to_csv1, save_stats_to_csv2
@@ -471,20 +471,16 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
 
         ## Se agrega esta parte
         if EA_CTX["enabled"]:
-            txgenesis["message_type"] = "JOIN"
-            txgenesis = attach_policy_to_transaction(
-                tx=txgenesis,
-                node=node_sink,
-                epoch=i + 1,
-                key=EA_CTX["policy_key"],
-                per=EA_SCENARIO.per,
-                retransmission_rate=EA_SCENARIO.retransmission_rate,
-                dag_load=EA_SCENARIO.dag_load,
-                security_risk=EA_SCENARIO.security_risk,
-                invalid_signature_rate=EA_SCENARIO.invalid_signature_rate,
-                downgrade_detected=EA_SCENARIO.downgrade_detected,
-                replay_detected=EA_SCENARIO.replay_detected,
-                suspicious_identity=EA_SCENARIO.suspicious_identity,
+            txgenesis = _ea_apply_policy_to_auth_tx(
+            tx=txgenesis,
+            sender_node=node_sink,
+            ea_ctx=EA_CTX,
+            epoch=i + 1,
+            per_i=EA_SCENARIO.per,
+            ret_i=EA_SCENARIO.retransmission_rate,
+            dag_load_i=EA_SCENARIO.dag_load,
+            security_risk_i=EA_SCENARIO.security_risk,
+            message_type="JOIN",
             )
 
         # Se comenta 08/10/2025
