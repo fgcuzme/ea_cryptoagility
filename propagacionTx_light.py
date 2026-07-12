@@ -15,6 +15,7 @@ from tangle_logger_light import MsTimer, log_tangle_event
 from ea_cryptoagility.integration_hooks import (
     attach_policy_to_transaction,
     log_ea_transaction,
+    maybe_tamper_policy_metadata,
 )
 
 from ea_cryptoagility.ea_crypto_costs import estimate_modem_energy_mj
@@ -90,6 +91,12 @@ def _ea_apply_policy_to_auth_tx(
         bitrate_bps=9200.0,
         p_tx_w=2.0,
         p_rx_w=0.75,
+    )
+
+    # IRR experiment: controlled policy_meta tampering before DAG ingestion.
+    tx = maybe_tamper_policy_metadata(
+    tx=tx,
+    ea_ctx=ea_ctx,
     )
 
     return tx

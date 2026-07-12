@@ -268,3 +268,115 @@ def log_ea_transaction(
         "invalid_tx_rejected": invalid_tx_rejected,
         "attack_label": state.get("attack_label", "NONE"),
     })
+
+
+# New function
+def maybe_tamper_policy_metadata(
+    tx: Dict[str, Any],
+    ea_ctx: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Injects controlled policy_meta tampering for IRR evaluation.
+
+    This function must be called after attach_policy_to_transaction()
+    and before ingest_tx(). It modifies policy_meta after policy_mac has
+    been computed, so verify_transaction_policy() should reject the tx.
+    """
+    import random
+    import os
+
+    if ea_ctx is None or not ea_ctx.get("enabled", False):
+        return tx
+
+    if not isinstance(tx, dict):
+        return tx
+
+    if not isinstance(tx.get("policy_meta"), dict):
+        return tx
+
+    # Global switch
+    enabled = int(os.environ.get("EA_ENABLE_POLICY_TAMPERING", "0"))
+    if enabled != 1:
+        return tx
+
+    # Optional scenario filter
+    scenario_id = str(ea_ctx.get("scenario_id", ""))
+    target_scenarios = os.environ.get("EA_TAMPER_SCENARIOS", "").strip()
+
+    if target_scenarios:
+        allowed = {s.strip() for s in target_scenarios.split(",") if s.strip()}
+        if scenario_id not in allowed:
+            return tx
+
+    # Optional message-type filter.
+    # Strong recommendation: do not tamper JOIN in the first validation,
+    # because it may disrupt the whole authentication chain.
+    msg_type = str(
+        tx.get("message_type")
+        or tx.get("MessageType")
+        or tx.get("Type")
+        or tx.get("ea_state", {}).get("message_type", "")
+    )
+
+    target_msg_types = os.environ.get(
+        "EA_TAMPER_MESSAGE_TYPES",
+        "KEY_UPDATE,CONTROL"
+    ).strip()
+
+    if target_msg_types:
+        allowed_msg = {s.strip() for s in target_msg_types.split(",") if s.strip()}
+        if msg_type not in allowed_msg:
+            return tx
+
+    prob = float(os.environ.get("EA_TAMPER_POLICY_PROB", "0.0"))
+
+    if prob <= 0.0:
+        return tx
+
+    if random.random() > prob:
+        return tx
+
+    meta = tx["policy_meta"]
+
+    tamper_field = os.environ.get("EA_TAMPER_FIELD", "policy_mac")
+
+    tx.setdefault("ea_state", {})
+    tx["ea_state"]["attack_label"] = "POLICY_TAMPERING"
+    tx["ea_state"]["policy_tamper_injected"] = True
+
+    tx["policy_tamper_injected"] = True
+    tx["tampered_policy_field"] = tamper_field
+
+    if tamper_field == "policy_mac":
+        old_mac = str(meta.get("policy_mac", ""))
+        if old_mac:
+            # Flip first hex char deterministically enough for MAC mismatch.
+            first = old_mac[0]
+            new_first = "0" if first != "0" else "1"
+            meta["policy_mac"] = new_first + old_mac[1:]
+        else:
+            meta["policy_mac"] = "00"
+
+    elif tamper_field == "profile_id":
+        old = str(meta.get("profile_id", "S1"))
+        meta["profile_id"] = "S2" if old != "S2" else "S1"
+
+    elif tamper_field == "risk_level":
+        old = str(meta.get("risk_level", "R_LOW"))
+        meta["risk_level"] = "R_HIGH" if old != "R_HIGH" else "R_LOW"
+
+    elif tamper_field == "energy_bucket":
+        old = str(meta.get("energy_bucket", "E_75_100"))
+        meta["energy_bucket"] = "E_0_25" if old != "E_0_25" else "E_75_100"
+
+    elif tamper_field == "epoch":
+        meta["epoch"] = int(meta.get("epoch", 1)) + 999
+
+    else:
+        # Default safe tamper: corrupt MAC.
+        old_mac = str(meta.get("policy_mac", ""))
+        meta["policy_mac"] = "00" + old_mac[2:] if len(old_mac) >= 2 else "00"
+
+    tx["policy_meta"] = meta
+
+    return tx
