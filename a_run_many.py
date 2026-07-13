@@ -3,7 +3,7 @@ import os, subprocess, sys
 from pathlib import Path
 
 # Tamaños de red
-# node_sizes = [20, 50, 100, 200, 300, 400, 500]
+# node_sizes = [20, 50, 100, 200]
 # node_sizes = [400, 500, 700, 900, 1000]
 node_sizes = [20]
 
@@ -59,7 +59,8 @@ def run_batch(
     seed0=1337,
     seeds_mode="inc",   # "inc" => seed0, seed0+1,...  | "same" => mismo seed para todos
     ea_modes=None,
-    ea_scenarios=None
+    ea_scenarios=None,
+    security_irr=False
 ):
     
     ea_modes = EA_MODES if ea_modes is None else ea_modes
@@ -121,6 +122,22 @@ def run_batch(
 
                     # Energia inicial
                     env["UWSN_ENERGY_INITIAL_J"] = "50.0"
+                    
+                    # ------------------------------------------------------------
+                    # Security experiment: IRR via policy_meta tampering
+                    # ------------------------------------------------------------
+                    if SECURITY_IRR and ea_enabled == 1 and ea_scenario_id == "SC4_HIGH_RISK":
+                        env["EA_ENABLE_POLICY_TAMPERING"] = "1"
+                        env["EA_TAMPER_POLICY_PROB"] = "0.10"
+                        env["EA_TAMPER_SCENARIOS"] = "SC4_HIGH_RISK"
+                        env["EA_TAMPER_MESSAGE_TYPES"] = "KEY_UPDATE"
+                        env["EA_TAMPER_FIELD"] = "policy_mac"
+                    else:
+                        env["EA_ENABLE_POLICY_TAMPERING"] = "0"
+                        env.pop("EA_TAMPER_POLICY_PROB", None)
+                        env.pop("EA_TAMPER_SCENARIOS", None)
+                        env.pop("EA_TAMPER_MESSAGE_TYPES", None)
+                        env.pop("EA_TAMPER_FIELD", None)
 
                     print(f">>> NODES={size} RUN={env['RUN']} SEED={env['UWSN_SEED']}")
                     # knobs de rendimiento/registro (ver sección 4)
@@ -128,25 +145,32 @@ def run_batch(
                     # env.setdefault("UWSN_TANGLE_BATCH", "64")       # flush CSV cada 64 eventos
                     # env.setdefault("UWSN_TANGLE_RESERVOIR", "1024") # p* cálculos
                     # ejecuta la simulación
-                    subprocess.run(["python", "simulation_test1_light.py",
+                    #subprocess.run(["python", "simulation_test1_light.py",
+                    #                "--output_dir", run_dir], env=env, check=True)
+                    subprocess.run(["./simulation_test1_light_arm",
                                     "--output_dir", run_dir], env=env, check=True)
-                    # subprocess.run(["./simulation_test1_light_arm",
-                    #                 "--output_dir", run_dir], env=env, check=True)
 
 if __name__ == "__main__":
 
-    if os.environ.get("EA_ONLY", "0") == "1":
-        ea_modes = [1]
-    elif os.environ.get("BASELINE_ONLY", "0") == "1":
-        ea_modes = [0]
-    else:
-        ea_modes = [0, 1]
+    SECURITY_IRR = True   # False: campaña normal / True: campaña DDR-IRR
 
-    scenario_filter = os.environ.get("EA_SCENARIO_ID", "")
-    if scenario_filter:
-        ea_scenarios = [scenario_filter]
+    if SECURITY_IRR:
+        ea_modes = [1]
+        ea_scenarios = ["SC4_HIGH_RISK"]
     else:
-        ea_scenarios = EA_SCENARIOS
+        if os.environ.get("EA_ONLY", "0") == "1":
+            ea_modes = [1]
+        elif os.environ.get("BASELINE_ONLY", "0") == "1":
+            ea_modes = [0]
+        else:
+            ea_modes = [0, 1]
+
+        scenario_filter = os.environ.get("EA_SCENARIO_ID", "")
+        if scenario_filter:
+            ea_scenarios = [scenario_filter]
+        else:
+            ea_scenarios = EA_SCENARIOS
+        
 
     run_batch(scenario=os.environ.get("SCENARIO_ID", name_scenario),
               runs=int(os.environ.get("RUNS","1")),
@@ -154,8 +178,8 @@ if __name__ == "__main__":
               #num_nodes=int(os.environ.get("NUM_NODES", "20")),
               seeds_mode=os.environ.get("SEEDS_MODE","inc"),
               ea_modes=ea_modes,
-            #   ea_modes="1",
-              ea_scenarios=ea_scenarios
+              ea_scenarios=ea_scenarios,
+              security_irr=SECURITY_IRR
               )
 
 
