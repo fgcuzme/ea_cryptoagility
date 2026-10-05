@@ -12,12 +12,84 @@ CANON_CSV = os.environ.get("UWSN_EVENTS_CSV", "stats/transmissions.csv")
 
 PHASES = ["syn", "auth", "data"]
 
-def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
+# helper
+def _load_phase_energy(snapshot_csv, run_id, phase,):
+    snap = pd.read_csv(
+        snapshot_csv
+    )
+
+    snap["phase"] = (
+        snap["phase"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+
+    p = snap[
+        (snap["run_id"].astype(str) == str(run_id))
+        & (snap["phase"] == phase.lower())
+    ].copy()
+
+    start = (
+        p[p["boundary"] == "start"][
+            [
+                "node_id",
+                "role",
+                "cluster_id",
+                "cluster_head",
+                "residual_energy_j",
+            ]
+        ]
+        .rename(
+            columns={
+                "residual_energy_j":
+                    "residual_start_j"
+            }
+        )
+    )
+
+    end = (
+        p[p["boundary"] == "end"][
+            [
+                "node_id",
+                "residual_energy_j",
+            ]
+        ]
+        .rename(
+            columns={
+                "residual_energy_j":
+                    "residual_end_j"
+            }
+        )
+    )
+
+    energy = start.merge(
+        end,
+        on="node_id",
+        how="inner",
+        validate="one_to_one",
+    )
+
+    energy["energy_total_j"] = (
+        energy["residual_start_j"]
+        - energy["residual_end_j"]
+    ).clip(lower=0.0)
+
+    return energy
+###
+
+# def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
+def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None, snapshot_csv=None,):
     if not os.path.exists(input_csv):
         print(f"🚨 Archivo no encontrado: {input_csv}")
         return
     df = pd.read_csv(input_csv)
-    df = df[df["phase"].astype(str).str.contains(phase)]
+    # df = df[df["phase"].astype(str).str.contains(phase)]
+    
+    df["phase"] = (df["phase"].astype(str).str.strip().str.lower())
+
+    df = df[df["phase"] == phase.lower()]
+
     # df = df[df["phase"].astype(str).str.strip().str.lower() == phase.lower()]
 
     E0 = float(os.environ.get("UWSN_ENERGY_INITIAL_J", "100.0"))
@@ -30,19 +102,25 @@ def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
         rx = group[group["energy_event_type"] == "rx"]
 
         # Energía residual como transmisor
-        res_tx = tx[["sender_id", "residual_energy_sender"]].dropna()
-        res_tx = res_tx.rename(columns={"sender_id": "node_id", 
-                                        "residual_energy_sender": "residual_energy"})
-        res_tx = res_tx.groupby("node_id")["residual_energy"].min().reset_index()
+        # res_tx = tx[["sender_id", "residual_energy_sender"]].dropna()
+        # res_tx = res_tx.rename(columns={"sender_id": "node_id", 
+        #                                 "residual_energy_sender": "residual_energy"})
+        # res_tx = res_tx.groupby("node_id")["residual_energy"].min().reset_index()
 
         # Energía residual como receptor
-        res_rx = rx[["receiver_id", "residual_energy_receiver"]].dropna()
-        res_rx = res_rx.rename(columns={"receiver_id": "node_id", 
-                                        "residual_energy_receiver": "residual_energy"})
-        res_rx = res_rx.groupby("node_id")["residual_energy"].min().reset_index()
+        # res_rx = rx[["receiver_id", "residual_energy_receiver"]].dropna()
+        # res_rx = res_rx.rename(columns={"receiver_id": "node_id", 
+        #                                 "residual_energy_receiver": "residual_energy"})
+        # res_rx = res_rx.groupby("node_id")["residual_energy"].min().reset_index()
 
         # Unir ambas fuentes
-        residual_min = pd.concat([res_tx, res_rx]).groupby("node_id")["residual_energy"].min().reset_index()
+        # residual_min = pd.concat([res_tx, res_rx]).groupby("node_id")["residual_energy"].min().reset_index()
+
+        phase_energy = _load_phase_energy(snapshot_csv, run_id, phase,)
+
+        tx = group[group["energy_event_type"] == "tx"]
+
+        rx = group[group["energy_event_type"] == "rx"]
 
         tx_summary = tx.groupby("sender_id").agg(
             transmissions=("success", "count"),
@@ -57,19 +135,34 @@ def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
             energy_rx_j=("energy_j", "sum")
         ).reset_index().rename(columns={"receiver_id": "node_id"})
 
-        summary = pd.merge(tx_summary, rx_summary, on="node_id", how="outer")
-        summary = pd.merge(summary, residual_min, on="node_id", how="outer")
-        summary["energy_tx_j"] = summary["energy_tx_j"].fillna(0.0)
-        summary["energy_rx_j"] = summary["energy_rx_j"].fillna(0.0)
-        summary["energy_total_j"] = summary["energy_tx_j"] + summary["energy_rx_j"]
-        summary["latency_avg_ms"] = summary["latency_avg_ms"].round(2)
-        summary["energy_tx_j"] = summary["energy_tx_j"].round(8)
-        summary["energy_rx_j"] = summary["energy_rx_j"].round(8)
+        # summary = pd.merge(tx_summary, rx_summary, on="node_id", how="outer")
+        # summary = pd.merge(summary, residual_min, on="node_id", how="outer")
+        summary = phase_energy.merge(tx_summary, on="node_id", how="left",)
+        summary = summary.merge(rx_summary, on="node_id", how="left",)
 
-        summary["energy_standby_j"] = (E0 - summary["residual_energy"]) - (summary["energy_tx_j"] + summary["energy_rx_j"])
-        summary["energy_standby_j"] = summary["energy_standby_j"].clip(lower=0.0).round(18)
+        summary["energy_tx_j"] = (summary["energy_tx_j"].fillna(0.0))
+        summary["energy_rx_j"] = (summary["energy_rx_j"].fillna(0.0))
+        summary["energy_active_logged_j"] = (summary["energy_tx_j"] + summary["energy_rx_j"])
+
+        summary["energy_standby_j"] = (summary["energy_total_j"] - summary["energy_active_logged_j"]).clip(lower=0.0)
+
+        # summary["energy_tx_j"] = summary["energy_tx_j"].fillna(0.0)
+        # summary["energy_rx_j"] = summary["energy_rx_j"].fillna(0.0)
+
+        # # summary["energy_total_j"] = summary["energy_tx_j"] + summary["energy_rx_j"]
+
+        # summary["energy_active_j"] = (summary["energy_tx_j"] + summary["energy_rx_j"])
+
+        summary["latency_avg_ms"] = summary["latency_avg_ms"].round(2)
+        # summary["energy_tx_j"] = summary["energy_tx_j"].round(8)
+        # summary["energy_rx_j"] = summary["energy_rx_j"].round(8)
+
+        # corregir luego, se requiere guardar un snapshot de energía de todos los nodos al inicio y al final de cada fase.
+        # summary["energy_standby_j"] = (E0 - summary["residual_energy"]) - (summary["energy_tx_j"] + summary["energy_rx_j"])
+        # summary["energy_standby_j"] = summary["energy_standby_j"].clip(lower=0.0).round(18)
         
-        summary["energy_total_j"] = (summary["energy_total_j"]+ summary["energy_standby_j"]).round(8)
+        # summary["energy_total_j"] = (summary["energy_total_j"]+ summary["energy_standby_j"]).round(8)
+        summary["energy_total_j"] = (summary["energy_active_logged_j"] + summary["energy_standby_j"])
 
         summary["residual_energy"] = summary["residual_energy"].fillna(0.0).round(8)
         summary["packet_loss_percent"] = (summary["packet_lost"] / summary["transmissions"] * 100).round(2)
@@ -79,6 +172,10 @@ def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
             "latency_avg_ms", "energy_tx_j", "energy_rx_j", "energy_standby_j", 
             "energy_total_j","residual_energy", "packet_loss_percent"
         ]]
+
+        # agregado nuevo
+        SINK_ID = int(os.environ.get("UWSN_SINK_ID","0"))
+        summary = summary[summary["node_id"] != SINK_ID].copy()
 
         output_csv = os.path.join(output_dir, f"{run_id}_{phase}_per_node.csv")
         summary.to_csv(output_csv, index=False)
@@ -101,8 +198,83 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
     for run_id, group in df.groupby("run_id"):
         d = group.copy()
 
+        ##
+        msg = d["msg_type"].astype(str)
+
+        is_tx = (d["energy_event_type"] == "tx")
+
+        is_rx = (d["energy_event_type"] == "rx")
+
+        is_data = msg.str.startswith("DATA:")
+
+        is_ack = msg.str.startswith("ACK:")
+
+        is_retry = msg.str.contains(":RETRY",regex=False,)
+
+        all_tx = d[is_tx]
+
+        data_tx = d[is_tx & is_data]
+
+        initial_data_tx = d[is_tx & is_data & ~is_retry]
+
+        retry_tx = d[is_tx & is_data & is_retry]
+
+        ack_tx = d[is_tx & is_ack]
+
+        total_tx_events = len(all_tx)
+
+        logical_data_packets = len(initial_data_tx)
+
+        data_attempts = len(data_tx)
+
+        retransmissions = len(retry_tx)
+
+        ack_attempts = len(ack_tx)
+
+        ack_failures = int(
+            (
+                ~ack_tx["success"].astype(bool)
+            ).sum()
+        )
+        ##
+
+        ###
+        phase_energy = _load_phase_energy(
+            snapshot_csv,
+            run_id,
+            phase,
+        )
+
+        network_phase_energy_j = float(
+            phase_energy[
+                "energy_total_j"
+            ].sum()
+        )
+
+        active_event_energy_j = float(
+            d["energy_j"].sum()
+        )
+
+        standby_energy_j = max(
+            0.0,
+            network_phase_energy_j
+            - active_event_energy_j,
+        )
+        ###
+
+        # if "payload_len" in d.columns:
+        #     d["payload_bits"] = d["payload_len"].fillna(0).astype(int) * 8
+        # else:
+        #     d["payload_bits"] = 0
+
         if "payload_len" in d.columns:
-            d["payload_bits"] = d["payload_len"].fillna(0).astype(int) * 8
+            d["payload_bits"] = (
+                pd.to_numeric(
+                    d["payload_len"],
+                    errors="coerce"
+                )
+                .fillna(0)
+            )
         else:
             d["payload_bits"] = 0
         
@@ -115,9 +287,10 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
         # rx_success = rx_events["success"].sum()
 
         tx_events = d[d["energy_event_type"] == "tx"]
-        total_tx = len(tx_events)
+        # total_tx = len(tx_events)
+
         rx_events = d[d.energy_event_type == "rx"]
-        successful = int(rx_events["success"].sum())
+        # successful = int(rx_events["success"].sum())
 
         avg_latency = d["latency_ms"].mean()
         total_energy = d["energy_j"].sum()

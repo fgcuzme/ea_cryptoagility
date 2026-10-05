@@ -20,29 +20,133 @@ PER_VARIABLE = float(raw_per) if raw_per not in [None, "None"] else None
 # Se mantienen tamaños nominales fijos para asegurar
 # comparabilidad directa con el baseline U-Tangle:
 #
-#   DATA:
-#       payload field = 60 B
-#       header        = 10 B
-#       total         = 70 B
+# DATA:
+#     protected field = 60 B
+#     header          = 10 B
+#     total           = 70 B
 #
-#   AGG_DATA:
-#       payload field = 92 B
-#       header        = 11 B
-#       total         = 103 B
+# AGG_DATA:
+#     protected field = 92 B
+#     header          = 11 B
+#     total           = 103 B
 #
 # EA-CryptoAgility añade posteriormente policy metadata y
 # cryptographic proofs sobre estos tamaños base.
 # ============================================================
 # PER_VARIABLE = None
 VERBOSE = False
-PAYLOAD_BITS_SN = 60*8 # 480 bits
-PAYLOAD_BITS_CH = 92*8 # 736 bits
+# PAYLOAD_BITS_SN = 60*8 # 480 bits
+# PAYLOAD_BITS_CH = 92*8 # 736 bits
 
+# HEADER_BYTES_SN = 10
+# HEADER_BYTES_CH = 11
+
+# BASE_DATA_BYTES = 70
+# BASE_AGG_DATA_BYTES = 103
+
+# ============================================================
+# Fixed U-Tangle DATA-plane model
+# ============================================================
+
+# Ascon-128 v1.2 framing
+ASCON_NONCE_BYTES = 16
+ASCON_TAG_BYTES = 16
+
+# Complete protected field transmitted in the baseline frame:
+# nonce + ciphertext/plaintext-length + authentication tag
+PROTECTED_FIELD_SN_BYTES = 60
+PROTECTED_FIELD_CH_BYTES = 92
+
+# Protocol headers
 HEADER_BYTES_SN = 10
 HEADER_BYTES_CH = 11
 
+# Complete baseline acoustic frames
 BASE_DATA_BYTES = 70
 BASE_AGG_DATA_BYTES = 103
+
+# ============================================================
+# Minimal hop-by-hop ACK / ARQ model
+# ============================================================
+# El ACK se modela como un pequeño frame de control.
+# Se permite, por defecto, una única retransmisión DATA.
+# El valor puede cambiarse mediante variable de entorno sin
+# modificar el código experimental.
+# ============================================================
+ACK_BITS = 7 * 8
+MAX_DATA_RETRIES = int(os.environ.get("UAN_MAX_DATA_RETRIES","1")
+)
+
+# ------------------------------------------------------------
+# Plaintext actually processed by Ascon
+# ------------------------------------------------------------
+
+ASCON_PLAINTEXT_SN_BYTES = (
+    PROTECTED_FIELD_SN_BYTES
+    - ASCON_NONCE_BYTES
+    - ASCON_TAG_BYTES
+)
+
+ASCON_PLAINTEXT_CH_BYTES = (
+    PROTECTED_FIELD_CH_BYTES
+    - ASCON_NONCE_BYTES
+    - ASCON_TAG_BYTES
+)
+
+assert ASCON_PLAINTEXT_SN_BYTES == 28
+assert ASCON_PLAINTEXT_CH_BYTES == 60
+
+# Legacy names retained because the logger currently expects them.
+# IMPORTANT: these represent the COMPLETE PROTECTED FIELD,
+# not pure application plaintext.
+PAYLOAD_BITS_SN = PROTECTED_FIELD_SN_BYTES * 8
+PAYLOAD_BITS_CH = PROTECTED_FIELD_CH_BYTES * 8
+
+# helper para completar el plaintext hasta 28B o 60B
+def _prepare_nominal_ascon_plaintext(
+    plaintext,
+    target_bytes,
+):
+    """
+    Convierte el payload de aplicación a bytes y lo completa
+    hasta el workload criptográfico nominal usado por U-Tangle.
+
+    DATA SN -> CH:
+        target_bytes = 28 B
+
+    AGG CH -> Sink:
+        target_bytes = 60 B
+
+    El padding queda protegido por Ascon y no modifica el tamaño
+    del frame base, que permanece en 70 B / 103 B.
+    """
+
+    if isinstance(plaintext, str):
+        payload = plaintext.encode("utf-8")
+
+    elif isinstance(plaintext, bytes):
+        payload = plaintext
+
+    else:
+        raise TypeError(
+            "plaintext must be str or bytes"
+        )
+
+    original_length = len(payload)
+
+    if original_length > target_bytes:
+        raise ValueError(
+            "Application payload exceeds nominal Ascon "
+            f"plaintext capacity: {original_length} B > "
+            f"{target_bytes} B"
+        )
+
+    padded_payload = payload.ljust(
+        target_bytes,
+        b"\x00"
+    )
+
+    return padded_payload, original_length
 
 # Crea la tabla para almacenar las claves compartidas en la BBDD del nodo
 def create_shared_keys_table(db_path):
@@ -200,7 +304,6 @@ def generate_shared_keys(db_path, node_uw, CH, node_sink):
             
 
 from ascon import encrypt, decrypt
-import os
 
 def encrypt_message(shared_key, plaintext):
     """Cifra un mensaje con ASCON-128 usando la clave compartida."""
@@ -259,10 +362,6 @@ from path_loss import compute_path_loss, propagation_time1
 # }
 
 
-import numpy as np
-import random
-
-
 ### helper
 def _resolve_node_ref(nodes, node_ref, label="node"):
     """
@@ -302,7 +401,6 @@ def _ea_select_message_type_from_scenario(scenario, default="TELEMETRY"):
     This is mainly useful for SC3_DEGRADED_CHANNEL, where emergency alarms
     should occasionally trigger S4.
     """
-    import random
 
     message_mix = getattr(scenario, "message_mix", None)
 
@@ -412,6 +510,205 @@ def _ea_checkpoint_due(
         count % max(1, int(checkpoint_k))
     ) == 0
 
+# helper
+def _simulate_minimal_ack(sender_node, receiver_node, start_pos,
+    end_pos, E_schedule, bitrate, distance,
+    role_tx, role_rx, dest, effective_per_override=None,
+    verbose=False,
+):
+    """
+    Simula un ACK hop-by-hop mínimo.
+    Flujo:
+        DATA receiver -> ACK -> DATA sender
+    El ACK:
+      - usa el mismo modelo físico del enlace;
+      - tiene tamaño fijo ACK_BITS;
+      - no ejecuta criptografía adicional;
+      - no constituye una transacción DAG;
+      - consume energía TX/RX en nodos sumergidos;
+      - el Sink puede transmitir ACK, pero su energía no se
+        carga al presupuesto de batería UWSN.
+
+    Returns
+    -------
+    dict
+        success
+        energy_j
+        latency_s
+        per
+        tx_energy_j
+        rx_energy_j
+    """
+
+    # --------------------------------------------------------
+    # PHY del ACK.
+    # Mismo enlace, pero un frame mucho más corto.
+    # --------------------------------------------------------
+    (
+        ack_per,
+        ack_SL_db,
+        ack_snr_db,
+        ack_EbN0_db,
+        ack_ber,
+    ) = per_from_link(
+        f_khz=20.0,
+        distance_m=distance,
+        L=ACK_BITS,
+        bitrate=bitrate,
+    )
+
+    # --------------------------------------------------------
+    # Tiempo ACK:
+    # dirección inversa:
+    #     receiver -> sender
+    # --------------------------------------------------------
+    (
+        ack_prop_ms,
+        ack_tx_ms,
+        _,
+        ack_timeout_s,
+    ) = calculate_timeout(
+        end_pos,
+        start_pos,
+        bitrate=bitrate,
+        packet_size=ACK_BITS,
+        proc_time_s=0.0,
+    )
+
+    # --------------------------------------------------------
+    # Resultado físico del ACK
+    # --------------------------------------------------------
+    ack_success = propagate_with_probability(
+        per=ack_per,
+        override_per=effective_per_override,
+    )
+
+    E_ack_tx = 0.0
+    E_ack_rx = 0.0
+
+    # ========================================================
+    # ACK transmitter
+    # ========================================================
+    # El ACK lo transmite el receptor original del DATA.
+    # SN -> CH:
+    #       CH transmite ACK y consume batería.
+    # CH -> Sink:
+    #       Sink transmite ACK, pero asumimos alimentación
+    #       externa y no lo incluimos en energía UWSN.
+    # ========================================================
+    if (
+        dest != "Sink"
+        and "ResidualEnergy" in receiver_node
+    ):
+        e0_ack_tx = float(
+            receiver_node["ResidualEnergy"]
+        )
+        receiver_node = update_energy_node_tdma(
+            receiver_node,
+            start_pos,
+            E_schedule,
+            ack_timeout_s,
+            "ack",
+            role=role_rx,
+            action="tx",
+            verbose=verbose,
+            # ACK sin procesamiento criptográfico adicional.
+            t_verif_s=0.0,
+            packet_bits=ACK_BITS,
+            bitrate=bitrate,
+        )
+
+        E_ack_tx = (
+            e0_ack_tx
+            - float(
+                receiver_node["ResidualEnergy"]
+            )
+        )
+
+    # ========================================================
+    # ACK receiver
+    # ========================================================
+    # El sender DATA queda escuchando el ACK.
+    # Si el ACK llega:
+    #       RX normal.
+    # Si se pierde:
+    #       consumo durante timeout/listening.
+    # ========================================================
+    if "ResidualEnergy" in sender_node:
+        e0_ack_rx = float(
+            sender_node["ResidualEnergy"]
+        )
+
+        if ack_success:
+            sender_node = update_energy_node_tdma(
+                sender_node,
+                end_pos,
+                E_schedule,
+                ack_timeout_s,
+                "ack",
+                role=role_tx,
+                action="rx",
+                verbose=verbose,
+                t_verif_s=0.0,
+                packet_bits=ACK_BITS,
+                bitrate=bitrate,
+            )
+        else:
+            sender_node = update_energy_failed_rx(
+                sender_node,
+                end_pos,
+                ack_timeout_s,
+                role=role_tx,
+                verbose=verbose,
+            )
+
+        E_ack_rx = (
+            e0_ack_rx
+            - float(
+                sender_node["ResidualEnergy"]
+            )
+        )
+
+    # --------------------------------------------------------
+    # Latencia del ACK.
+    # ACK válido:
+    #       propagation + airtime
+    # ACK perdido:
+    #       timeout completo
+    # --------------------------------------------------------
+    if ack_success:
+        ack_latency_s = (
+            ack_prop_ms
+            + ack_tx_ms
+        ) / 1000.0
+    else:
+        ack_latency_s = (
+            ack_timeout_s
+        )
+
+    return {
+    # Resultado físico
+    "success": bool(ack_success),
+
+    # PHY
+    "per": float(ack_per),
+    "snr_db": float(ack_snr_db),
+    "ber": float(ack_ber),
+    "SL_db": float(ack_SL_db),
+    "EbN0_db": float(ack_EbN0_db),
+
+    # Energía
+    "energy_j": float(E_ack_tx + E_ack_rx),
+    "tx_energy_j": float(E_ack_tx),
+    "rx_energy_j": float(E_ack_rx),
+
+    # Timing
+    "latency_s": float(ack_latency_s),
+    "prop_ms": float(ack_prop_ms),
+    "tx_ms": float(ack_tx_ms),
+    "timeout_s": float(ack_timeout_s),
+}
+
 ## transmitir datos
 # from ea_cryptoagility.ea_crypto_costs import DEFAULT_OPERATION_COSTS
 from ea_cryptoagility.ea_profiles import (
@@ -503,22 +800,36 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     - PER por enlace con per_from_link + Bernoulli,
     - energía vía update_energy_node_tdma (incluye t_verif_s),
     - logging canónico con log_event (TX y RX),
-    - ACK simulado al final del hop.
+
+    - ACK hop-by-hop y retransmisión DATA acotada;
+    - el modelo ARQ es deliberadamente ligero y no representa
+    un MAC completo con contention/backoff/RTS/CTS.
     """
     ## helper
     sender_node = _resolve_node_ref(nodes, sender_node, label="sender_node")
     receiver_node = _resolve_node_ref(nodes, receiver_node, label="receiver_node")
 
-    # 0) Tipo de paquete por hop
-    if source == 'SN' and dest == 'CH':
-        msg_type = type_packet = 'data'
-        role_tx, role_rx = 'SN', 'CH'
-    elif source == 'CH' and dest == 'Sink':
-        msg_type = type_packet = 'agg'
-        role_tx, role_rx = 'CH', 'Sink'
+    # ============================================================
+    # 0) Validate DATA-plane hop
+    # ============================================================
+    # El modelo DATA revisado admite únicamente:
+    #   SN -> CH
+    #   CH -> Sink
+    # Cualquier otra combinación indica un error de configuración
+    # y no debe convertirse silenciosamente en otro tipo de frame.
+    # ============================================================
+    if source == "SN" and dest == "CH":
+        msg_type = type_packet = "data"
+        role_tx, role_rx = "SN", "CH"
+    elif source == "CH" and dest == "Sink":
+        msg_type = type_packet = "agg"
+        role_tx, role_rx = "CH", "Sink"
     else:
-        msg_type = type_packet = 'data'
-        role_tx, role_rx = source, dest
+        raise ValueError(
+            "Unsupported DATA-plane hop: "
+            f"source={source!r}, dest={dest!r}. "
+            "Expected 'SN' -> 'CH' or 'CH' -> 'Sink'."
+        )
 
     # 1) DB path (en /data/)
     current_dir = os.getcwd()
@@ -544,27 +855,89 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
     # 3) Cifrado/Descifrado
     # ============================================================
-    #
-    # Las operaciones criptográficas se ejecutan realmente para
-    # preservar la funcionalidad del protocolo.
-    #
-    # Sin embargo, el tiempo de procesamiento utilizado por el
-    # simulador NO se mide con perf_counter() en el host Python.
-    #
-    # Los tiempos simulados provienen de la calibración realizada
-    # sobre Raspberry Pi 3 y almacenada en energia_dinamica.py.
+    # ============================================================
+    # Select nominal Ascon workload
+    # ============================================================
+    # The acoustic baseline remains fixed:
+    #   SN -> CH   : 70 B frame
+    #   CH -> Sink : 103 B frame
+    # The corresponding Ascon plaintext workloads are:
+    #   SN -> CH   : 28 B
+    #   CH -> Sink : 60 B
     # ============================================================
 
-    encrypted_msg = encrypt_message(
-        shared_key,
-        plaintext
+    if source == "SN":
+        nominal_ascon_plaintext_bytes = (
+            ASCON_PLAINTEXT_SN_BYTES
+        )
+        expected_protected_field_bytes = (
+            PROTECTED_FIELD_SN_BYTES
+        )
+    else:
+        nominal_ascon_plaintext_bytes = (
+            ASCON_PLAINTEXT_CH_BYTES
+        )
+        expected_protected_field_bytes = (
+            PROTECTED_FIELD_CH_BYTES
+        )
+
+    # ------------------------------------------------------------
+    # Prepare fixed cryptographic workload
+    # ------------------------------------------------------------
+    plaintext_for_crypto, application_plaintext_bytes = (
+        _prepare_nominal_ascon_plaintext(
+            plaintext,
+            nominal_ascon_plaintext_bytes,
+        )
     )
 
-    # desencrypted_msg = decrypt_message(
-    #     shared_key,
-    #     encrypted_msg
-    # )
+    # Tamaño útil REAL de aplicación antes de padding,
+    # nonce, tag, headers y overhead EA.
+    application_payload_bits = (
+        int(application_plaintext_bytes)
+        * 8
+    )
 
+    # ------------------------------------------------------------
+    # Functional Ascon encryption
+    # ------------------------------------------------------------
+    encrypted_msg = encrypt_message(
+        shared_key,
+        plaintext_for_crypto
+    )
+
+    # ============================================================
+    # Functional / modeled protected-field consistency
+    # ============================================================
+    # encrypt_message() devuelve:
+    #       nonce || Ascon(ciphertext || tag)
+    # Por tanto esperamos exactamente:
+    # SN -> CH:
+    #       16 B nonce
+    #     + 28 B encrypted plaintext
+    #     + 16 B authentication tag
+    #     = 60 B
+    # CH -> Sink:
+    #       16 B nonce
+    #     + 60 B encrypted plaintext
+    #     + 16 B authentication tag
+    #     = 92 B
+    # Esto garantiza que el workload criptográfico real y el
+    # tamaño protegido usado por el modelo PHY coincidan.
+    # ============================================================
+
+    functional_ciphertext_bytes = len(encrypted_msg)
+
+    modeled_protected_field_bytes = int(expected_protected_field_bytes)
+
+    if (functional_ciphertext_bytes != modeled_protected_field_bytes):
+        raise ValueError(
+            "Unexpected Ascon protected-field size: "
+            f"{functional_ciphertext_bytes} B != "
+            f"{modeled_protected_field_bytes} B "
+            f"(source={source})"
+        )
+    
     # ------------------------------------------------------------
     # Tiempos criptográficos calibrados
     # Raspberry Pi 3 / U-Tangle baseline
@@ -598,90 +971,30 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
     # 4.1) Baseline U-Tangle packet size
     # ============================================================
-    #
-    # La evaluación usa tamaños nominales fijos para el plano DATA.
-    #
-    # Esto evita que diferencias accidentales en la representación
-    # Python del plaintext modifiquen la energía acústica o el PER.
-    #
-    # El objetivo experimental es que Static U-Tangle y
-    # EA-CryptoAgility partan exactamente del mismo frame base.
-    # ============================================================
+
     if source == "SN":
-        # --------------------------------------------------------
-        # Sensor Node -> Cluster Head
-        #   protected payload field : 60 B
-        #   protocol header         : 10 B
-        #   baseline DATA frame     : 70 B
-        # --------------------------------------------------------
-        modeled_payload_bits = PAYLOAD_BITS_SN
         header_bytes = HEADER_BYTES_SN
         base_frame_bytes = BASE_DATA_BYTES
     else:
-        # --------------------------------------------------------
-        # Cluster Head -> Sink
-        #   protected payload field : 92 B
-        #   protocol header         : 11 B
-        #   baseline AGG frame      : 103 B
-        # --------------------------------------------------------
-        modeled_payload_bits = PAYLOAD_BITS_CH
         header_bytes = HEADER_BYTES_CH
         base_frame_bytes = BASE_AGG_DATA_BYTES
 
-    # ============================================================
-    # Functional/model consistency check
-    # ============================================================
-    #
-    # La simulación PHY utiliza tamaños nominales fijos de
-    # U-Tangle (70 B / 103 B), mientras que encrypted_msg se
-    # genera realmente para comprobar la funcionalidad Ascon.
-    #
-    # Debemos garantizar que la representación criptográfica real
-    # nunca exceda el campo reservado por el modelo.
-    # ============================================================
 
-    functional_ciphertext_bytes = len(encrypted_msg)
+    # El campo protegido ya fue determinado y validado
+    # inmediatamente después de la operación Ascon.
+    modeled_payload_bits = (modeled_protected_field_bytes * 8)
 
-    modeled_protected_field_bytes = (
-        modeled_payload_bits // 8
-    )
+    normal_bits_sent = (modeled_payload_bits + header_bytes * 8)
 
-    if (
-        functional_ciphertext_bytes
-        > modeled_protected_field_bytes
-    ):
-        raise ValueError(
-            "Functional Ascon representation exceeds "
-            "the modeled protected field: "
-            f"{functional_ciphertext_bytes} B > "
-            f"{modeled_protected_field_bytes} B"
-        )
-
-    # ------------------------------------------------------------
-    # Baseline frame actually used by the acoustic model.
-    # ------------------------------------------------------------
-    normal_bits_sent = (
-        modeled_payload_bits
-        + header_bytes * 8
-    )
-
-    # ------------------------------------------------------------
-    # Consistency check.
-    #
-    # Detecta inmediatamente una modificación accidental de las
-    # constantes que rompa la configuración del baseline.
-    # ------------------------------------------------------------
-    assert normal_bits_sent == base_frame_bytes * 8, (
+    assert (
+        normal_bits_sent
+        == base_frame_bytes * 8
+    ), (
         "Inconsistent U-Tangle baseline packet size: "
-        f"computed={normal_bits_sent / 8:.0f} B, "
-        f"expected={base_frame_bytes} B"
+        f"{normal_bits_sent / 8:.0f} B != "
+        f"{base_frame_bytes} B"
     )
 
-    # ------------------------------------------------------------
-    # Sin EA, este es el tamaño final.
-    #
-    # Si EA está activo, policy_meta/proofs se añadirán después.
-    # ------------------------------------------------------------
     bits_sent = normal_bits_sent
     ################
 
@@ -716,15 +1029,6 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             scenario,
             default="TELEMETRY"
         )
-
-        # tx_ea = {
-        #     "ID": f"DATA-{sender_id}-{receiver_id}-{time.time()}",
-        #     "Source": sender_id,
-        #     "Type": "DATA" if source == "SN" else "AGG",
-        #     "message_type": message_type_ea,
-        #     "Payload": plaintext if isinstance(plaintext, str) else str(plaintext),
-        #     "ApprovedTx": [],
-        # }
 
         tx_ea = {
             # --------------------------------------------------------
@@ -776,17 +1080,33 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
         ea_cost = tx_ea.setdefault("ea_cost", {})
 
-        policy_meta_bytes = int(ea_cost.get("policy_meta_bytes", 0))
-        # crypto_proof_bytes = int(ea_cost.get("crypto_proof_bytes", 0))
+        # ============================================================
+        # Policy-metadata size consistency
+        # ============================================================
+        # ea_profiles.py is the canonical source for the modeled
+        # policy-metadata size.
+        # ============================================================
+        policy_meta_bytes = int(
+            POLICY_META_SIZE_BYTES
+        )
 
-        # checkpoint_rule = tx_ea.get("Policy", {}).get("checkpoint_rule", "")
+        initial_policy_meta_bytes = (
+            ea_cost.get(
+                "policy_meta_bytes",
+                None
+            )
+        )
 
-        # profile_id = tx_ea.get("Policy", {}).get("profile_id", "")
-        # checkpoint_rule = tx_ea.get("Policy", {}).get("checkpoint_rule", "")
-
-        # K_PERIODIC = int(os.environ.get("EA_CHECKPOINT_K_PERIODIC", "10"))
-        # K_BATCHED = int(os.environ.get("EA_CHECKPOINT_K_BATCHED", "25"))
-        # K_DELAYED = int(os.environ.get("EA_CHECKPOINT_K_DELAYED", "30"))
+        if (
+            initial_policy_meta_bytes is not None
+            and int(initial_policy_meta_bytes)
+                != policy_meta_bytes
+        ):
+            raise ValueError(
+                "Inconsistent policy metadata size: "
+                f"integration_hooks={initial_policy_meta_bytes} B, "
+                f"ea_profiles={policy_meta_bytes} B"
+            )
 
   
         ## Agregado
@@ -967,10 +1287,6 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 checkpoint_hash_bytes
             )
 
-        policy_meta_bytes = int(
-            POLICY_META_SIZE_BYTES
-        )
-
         ea_overhead_bytes = (
             policy_meta_bytes
             + extra_proof_bytes
@@ -1010,13 +1326,74 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 },
             )
 
-
         ea_cost = tx_ea.setdefault(
             "ea_cost",
             {}
         )
 
+        ### ea_cost.update #1
         ea_cost.update({
+            # campos adicionales
+            "source_role":
+                source,
+
+            "destination_role":
+                dest,
+
+            "ascon_nonce_bytes":
+                ASCON_NONCE_BYTES,
+
+            "ascon_tag_bytes":
+                ASCON_TAG_BYTES,
+
+            # ========================================================
+            # FRAME / SIZE INFORMATION
+            # ========================================================
+
+            # Tamaño de aplicación antes del padding nominal.
+            "application_plaintext_bytes":
+                application_plaintext_bytes,
+
+            # Workload plaintext realmente procesado por Ascon.
+            #
+            # SN -> CH   = 28 B
+            # CH -> Sink = 60 B
+            "nominal_ascon_plaintext_bytes":
+                nominal_ascon_plaintext_bytes,
+
+            # Resultado funcional:
+            #
+            # nonce + ciphertext + tag
+            #
+            # SN -> CH   = 60 B
+            # CH -> Sink = 92 B
+            "functional_ciphertext_bytes":
+                functional_ciphertext_bytes,
+
+            # Campo protegido utilizado por el modelo.
+            # Debe coincidir exactamente con el valor anterior.
+            "modeled_protected_field_bytes":
+                modeled_protected_field_bytes,
+
+            # Frame U-Tangle antes de añadir EA.
+            #
+            # DATA = 70 B
+            # AGG  = 103 B
+            "modeled_baseline_frame_bytes":
+                base_frame_bytes,
+
+            "header_bytes":
+                header_bytes,
+
+            # Tamaño base en bits.
+            "normal_bits_sent":
+                normal_bits_sent,
+
+
+            # ========================================================
+            # EA FRAME OVERHEAD
+            # ========================================================
+
             "policy_meta_bytes":
                 policy_meta_bytes,
 
@@ -1026,9 +1403,12 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             "ea_overhead_bits":
                 ea_overhead_bits,
 
-            "normal_bits_sent":
-                normal_bits_sent,
-
+            # Tamaño realmente utilizado por:
+            #
+            #   PER
+            #   airtime
+            #   TX energy
+            #   RX energy
             "effective_bits_sent":
                 bits_sent,
 
@@ -1039,74 +1419,53 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     )
                 ),
 
-            # Periodicidad configurada.
+            # ========================================================
+            # CHECKPOINT / REKEY EVENT
+            # ========================================================
+
             "checkpoint_k":
                 checkpoint_k,
 
-            # Indica si ESTA transacción contiene checkpoint.
             "checkpoint_due":
                 checkpoint_due,
 
-            # Compatibilidad temporal con análisis anteriores.
+            # Legacy fields kept temporarily
             "checkpoint_amortization_k":
                 checkpoint_k,
 
-            # El campo legacy ya no significa 1/K.
-            # Ahora vale exclusivamente 0.0 o 1.0.
             "checkpoint_amortization":
                 checkpoint_factor,
 
             "rekey_triggered":
                 rekey_triggered,
 
-            "ea_sender_incremental_time_ms":
-                sender_incremental[
-                    "incremental_processing_time_ms"
-                ],
+            # ========================================================
+            # EA SENDER PROCESSING
+            # ========================================================
 
-            "ea_sender_incremental_energy_mj":
-                sender_incremental[
-                    "incremental_processing_energy_mj"
-                ],
+            "ea_sender_incremental_time_ms":
+                float(
+                    sender_incremental[
+                        "incremental_processing_time_ms"
+                    ]
+                ),
+
+            # IMPORTANTE:
+            # Ésta es la energía calculada por el modelo antes de
+            # descontarla de ResidualEnergy.
+            "ea_sender_incremental_modeled_energy_mj":
+                float(
+                    sender_incremental[
+                        "incremental_processing_energy_mj"
+                    ]
+                ),
 
             "sender_incremental_ops":
                 sender_incremental[
                     "incremental_operation_counts"
                 ],
-
-            "functional_ciphertext_bytes":
-                functional_ciphertext_bytes,
-
-            "modeled_protected_field_bytes":
-                modeled_protected_field_bytes,
-
-            "modeled_slack_bytes":
-                (
-                    modeled_protected_field_bytes
-                    - functional_ciphertext_bytes
-                ),
-
-            "modeled_baseline_frame_bytes":
-                base_frame_bytes,
         })
         ####
-
-        # ea_overhead_bits = 8 * (policy_meta_bytes + crypto_proof_bytes)
-
-        # # Tamaño físico efectivo bajo EA:
-        # # ciphertext real + header normal + metadata/proof EA.
-        # bits_sent = normal_bits_sent + ea_overhead_bits
-
-        # Guardar trazabilidad para el CSV EA.
-        # ea_cost["ciphertext_bytes"] = len(encrypted_msg)
-        ea_cost["functional_ciphertext_bytes"] = len(encrypted_msg)
-        ea_cost["modeled_baseline_frame_bytes"] = base_frame_bytes
-        ea_cost["modeled_payload_bytes"] = modeled_payload_bits // 8
-        ea_cost["header_bytes"] = header_bytes
-        # ea_cost["normal_bits_sent"] = normal_bits_sent
-        # ea_cost["ea_overhead_bits"] = ea_overhead_bits
-        # ea_cost["effective_bits_sent"] = bits_sent
-        # ea_cost["tx_size_bytes"] = int((bits_sent + 7) // 8)
 
     # Tiempo de transmisión y PER final con el tamaño realmente usado.
     t_tx_s = bits_sent / float(bitrate)
@@ -1230,24 +1589,37 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     E_tx_total = E_tx
 
     # EA-CryptoAgility:
+    # ------------------------------------------------------------
+    # EA-CryptoAgility sender incremental processing
+    # ------------------------------------------------------------
     if ea_enabled and tx_ea is not None:
-
+        # Energía solicitada por el modelo de procesamiento.
         sender_inc_mj = float(
             tx_ea["ea_cost"].get(
-                "ea_sender_incremental_energy_mj",
+                "ea_sender_incremental_modeled_energy_mj",
                 0.0
             )
         )
 
-        E_ea_sender = \
+        # Energía efectivamente descontada de ResidualEnergy.
+        # Return value is in joules.
+        E_ea_sender = (
             apply_incremental_processing_energy(
                 sender_node,
                 sender_inc_mj
             )
+        )
 
         E_tx_total = (
             E_tx
             + E_ea_sender
+        )
+
+        # Guardar la energía realmente contabilizada [mJ].
+        tx_ea["ea_cost"][
+            "ea_sender_incremental_energy_mj"
+        ] = (
+            E_ea_sender * 1000.0
         )
     ###
 
@@ -1328,15 +1700,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # El tiempo utilizado por la simulación NO se mide aquí.
         # t_dec_s proviene de la calibración Raspberry Pi 3.
         # --------------------------------------------------------
-        decrypted_msg = decrypt_message(
-            shared_key,
-            encrypted_msg
-        )
+        decrypted_msg = decrypt_message(shared_key, encrypted_msg)
 
         # --------------------------------------------------------
         # Rechazo criptográfico.
         # El paquete llegó por el canal, por tanto:
-        #
         #       channel_success = True
         #       p_lost          = False
         # pero puede no ser aceptado:
@@ -1352,12 +1720,10 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # --------------------------------------------------------
         # Procesamiento adicional EA-CryptoAgility
         # --------------------------------------------------------
-        #
         # Se ejecuta únicamente cuando:
         #   1. el frame llegó físicamente;
         #   2. Ascon lo aceptó;
         #   3. EA-CryptoAgility está habilitado.
-        #
         # IMPORTANTE:
         # ASCON_AEAD_DEC se excluye del coste EA porque ya está
         # contabilizado en el baseline U-Tangle mediante:
@@ -1438,6 +1804,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 {}
             )
 
+            # ea_cost.update #2
             ea_cost.update({
                 # Tiempo computacional modelado en el receiver.
                 "ea_receiver_incremental_time_ms":
@@ -1472,9 +1839,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
         # --------------------------------------------------------
         # Tiempo total de procesamiento observado en RX
-        #
         # Esto afecta a la LATENCIA.
-        #
         # Sin embargo, update_energy_node_tdma recibirá únicamente
         # t_dec_s para no volver a cobrar la energía EA.
         # --------------------------------------------------------
@@ -1707,12 +2072,879 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     receiver_node["ResidualEnergy"]
                 )
             )
+      
+        else:
+            E_rx = 0.0
+
+        log_event(
+            run_id=RUN_ID,
+            phase="data",
+            module="ascon",
+            msg_type=f"DATA:{msg_type}:RX",
+            sender_id=sender_id,
+            receiver_id=receiver_id,
+            cluster_id=(
+                receiver_node.get("ClusterHead")
+                if dest != "Sink"
+                else sender_node.get("ClusterHead")
+            ),
+            start_pos=start_pos,
+            end_pos=end_pos,
+            bits_sent=bits_sent,
+            bits_received=0,
+            payload_bits=modeled_payload_bits,
+            success=False,
+            packet_lost=True,
+            energy_event_type="rx",
+            energy_j=E_rx,
+            residual_sender=
+                sender_node["ResidualEnergy"],
+            residual_receiver=(
+                0
+                if dest == "Sink"
+                else receiver_node["ResidualEnergy"]
+            ),
+            bitrate=bitrate,
+            freq_khz=20,
+            lat_prop_ms=t_prop_s * 1000.0,
+            lat_tx_ms=t_tx_s * 1000.0,
+            lat_proc_ms=0.0,
+            snr_db=snr_db,
+            per=per_link,
+            lat_dag_ms=0.0,
+            SL_db=SL_db,
+            EbN0_db=EbN0_db,
+            BER=ber,
+        )
+
+        E_rx_total = E_rx
+    ##################################
+
+
+    # ============================================================
+    # 9.5) Minimal hop-by-hop ACK / retry
+    # ============================================================
+    #
+    # Modelo ARQ simplificado:
+    #   DATA -> ACK
+    # Si:
+    #   - DATA se pierde físicamente, o
+    #   - ACK se pierde,
+    # el sender puede retransmitir el MISMO frame protegido.
+    # No se vuelve a ejecutar:
+    #   - ASCON encryption en el sender,
+    #   - policy selection,
+    #   - signature generation,
+    #   - checkpoint generation,
+    #   - rekey.
+    # Por tanto el retry representa principalmente overhead
+    # acústico/link-layer.
+    # Si la primera recepción válida ocurre durante un retry,
+    # sí se contabiliza el procesamiento RX correspondiente.
+    # ============================================================
+
+    # ------------------------------------------------------------
+    # Estadísticas del evento
+    # ------------------------------------------------------------
+    data_attempts = 1
+    retransmissions = 0
+    ack_attempts = 0
+    ack_failures = 0
+    ack_confirmed = False
+
+    # ------------------------------------------------------------
+    # Energía adicional causada por ACK/retries [J]
+    # ------------------------------------------------------------
+    ack_energy_j = 0.0
+    retry_data_energy_j = 0.0
+
+    # ------------------------------------------------------------
+    # Procesamiento ocurrido específicamente durante retries [J]
+    # Necesitamos separarlo para que posteriormente no aparezca
+    # incorrectamente como energía de comunicación.
+    # ------------------------------------------------------------
+    retry_base_processing_energy_j = 0.0
+    retry_ea_processing_energy_j = 0.0
+
+    retry_base_processing_time_s = 0.0
+    retry_ea_processing_time_s = 0.0
+    retry_receiver_ops = {}
+
+    # ------------------------------------------------------------
+    # Latencia adicional causada por ACK/retry [s]
+    # ------------------------------------------------------------
+    link_extra_latency_s = 0.0
+
+    # ------------------------------------------------------------
+    # Standby adicional de los nodos NO participantes durante ARQ.
+    # Este tiempo NO se suma a la latencia del hop porque ocurre
+    # simultáneamente con ACK/retry.
+    # Se usa únicamente para:
+    #   - descontar energía standby de los demás nodos;
+    #   - trazabilidad experimental.
+    # ------------------------------------------------------------
+    arq_standby_time_s = 0.0
+
+    # ------------------------------------------------------------
+    # Estado lógico del frame
+    # accepted_once:
+    #   el DATA ha sido aceptado al menos una vez.
+    # crypto_rejected:
+    #   el frame llegó físicamente pero falló su autenticación.
+    # Un crypto reject NO debe resolverse retransmitiendo el mismo
+    # ciphertext; por tanto no activamos ARQ en ese caso.
+    # ------------------------------------------------------------
+    accepted_once = bool(success)
+    crypto_rejected = bool(
+        channel_success
+        and not success
+    )
+
+    # El receptor debe enviar ACK cuando acaba de aceptar DATA.
+    ack_pending = bool(
+        accepted_once
+    )
+
+    # ============================================================
+    # ARQ loop
+    # ============================================================
+    while not crypto_rejected:
+        # ========================================================
+        # ACK correspondiente al último DATA recibido
+        # ========================================================
+        if ack_pending:
+            ack_result = _simulate_minimal_ack(
+                sender_node=sender_node,
+                receiver_node=receiver_node,
+                start_pos=start_pos,
+                end_pos=end_pos,
+                E_schedule=E_schedule,
+                bitrate=bitrate,
+                distance=distance,
+                role_tx=role_tx,
+                role_rx=role_rx,
+                dest=dest,
+                effective_per_override=
+                    effective_per_override,
+                verbose=VERBOSE,
+            )
+
+            ack_attempts += 1
+            ack_energy_j += float(
+                ack_result["energy_j"]
+            )
+
+            link_extra_latency_s += float(
+                ack_result["latency_s"]
+            )
+
+            #####
+            # El modelo TDMA reserva el slot hasta timeout.
+            # La latencia real del ACK se mantiene separada en
+            # ack_result["latency_s"].
+            ack_standby_s = float(
+                ack_result["timeout_s"]
+            )
+
+            if ack_standby_s > 0.0:
+                nodes = update_energy_standby_others(
+                    nodes,
+                    active_ids,
+                    active_cluster_id,
+                    ack_standby_s,
+                    verbose=VERBOSE,
+                )
+
+                arq_standby_time_s += (
+                    ack_standby_s
+                )
+            #####
+
+            ######
+            # ========================================================
+            # Log ACK TX / RX
+            # ========================================================
+            # Dirección ACK:
+            #     DATA receiver -> DATA sender
+            # Por tanto sender_id y receiver_id se invierten respecto
+            # al DATA original.
+            # Los ACK se registran como eventos físicos ARQ, pero NO
+            # constituyen transacciones DAG independientes.
+            # ========================================================
+            ack_sender_id = receiver_id
+            ack_receiver_id = sender_id
+
+            ack_cluster_id = (
+                receiver_node.get("ClusterHead")
+                if dest != "Sink"
+                else sender_node.get("ClusterHead")
+            )
+
+            ack_bits_received = (
+                ACK_BITS
+                if ack_result["success"]
+                else 0
+            )
+
+            ack_residual_sender = (
+                0.0
+                if dest == "Sink"
+                else float(
+                    receiver_node.get(
+                        "ResidualEnergy",
+                        0.0
+                    )
+                )
+            )
+
+            ack_residual_receiver = float(
+                sender_node.get(
+                    "ResidualEnergy",
+                    0.0
+                )
+            )
+
+            # --------------------------------------------------------
+            # ACK TX
+            # --------------------------------------------------------
+            log_event(
+                run_id=RUN_ID,
+                phase="data",
+                module="arq",
+                msg_type=(
+                    f"ACK:{msg_type}:"
+                    f"ATTEMPT{ack_attempts}:TX"
+                ),
+                sender_id=ack_sender_id,
+                receiver_id=ack_receiver_id,
+                cluster_id=ack_cluster_id,
+
+                # Dirección inversa al DATA
+                start_pos=end_pos,
+                end_pos=start_pos,
+
+                bits_sent=ACK_BITS,
+                bits_received=ack_bits_received,
+
+                # ACK no contiene payload de aplicación.
+                payload_bits=0,
+                success=bool(ack_result["success"]),
+                packet_lost=not bool(ack_result["success"]),
+                energy_event_type="tx",
+                energy_j=float(ack_result["tx_energy_j"]),
+                residual_sender=ack_residual_sender,
+                residual_receiver=ack_residual_receiver,
+                bitrate=bitrate,
+                freq_khz=20,
+                lat_prop_ms=float(ack_result["prop_ms"]),
+                lat_tx_ms=float(ack_result["tx_ms"]),
+                lat_proc_ms=0.0,
+                snr_db=float(ack_result["snr_db"]),
+                per=float(ack_result["per"]),
+                lat_dag_ms=0.0,
+                SL_db=float(ack_result["SL_db"]),
+                EbN0_db=float(ack_result["EbN0_db"]),
+                BER=float(ack_result["ber"]),
+            )
+
+            # --------------------------------------------------------
+            # ACK RX
+            # --------------------------------------------------------
+            #
+            # Si el ACK se pierde, este evento representa el consumo
+            # de listening/timeout ya calculado por el helper.
+            # --------------------------------------------------------
 
             log_event(
                 run_id=RUN_ID,
                 phase="data",
-                module="ascon",
-                msg_type=f"DATA:{msg_type}:RX",
+                module="arq",
+                msg_type=(
+                    f"ACK:{msg_type}:"
+                    f"ATTEMPT{ack_attempts}:RX"
+                ),
+                sender_id=ack_sender_id,
+                receiver_id=ack_receiver_id,
+                cluster_id=ack_cluster_id,
+                start_pos=end_pos,
+                end_pos=start_pos,
+                bits_sent=ACK_BITS,
+                bits_received=ack_bits_received,
+                payload_bits=0,
+                success=bool(ack_result["success"]),
+                packet_lost=not bool(ack_result["success"]),
+                energy_event_type="rx",
+                energy_j=float(ack_result["rx_energy_j"]),
+                residual_sender=ack_residual_sender,
+                residual_receiver=ack_residual_receiver,
+                bitrate=bitrate,
+                freq_khz=20,
+                lat_prop_ms=float(ack_result["prop_ms"]),
+                lat_tx_ms=float(ack_result["tx_ms"]),
+                lat_proc_ms=0.0,
+                snr_db=float(ack_result["snr_db"]),
+                per=float(ack_result["per"]),
+                lat_dag_ms=0.0,
+                SL_db=float(ack_result["SL_db"]),
+                EbN0_db=float(ack_result["EbN0_db"]),
+                BER=float(ack_result["ber"]),
+            )
+            #######
+
+            # ----------------------------------------------------
+            # ACK recibido correctamente:
+            # transacción link-layer finalizada.
+            # ----------------------------------------------------
+            if ack_result["success"]:
+                ack_confirmed = True
+                break
+
+
+            # ----------------------------------------------------
+            # ACK perdido:
+            # el receiver puede haber recibido correctamente DATA,
+            # pero el sender no tiene confirmación.
+            # ----------------------------------------------------
+
+            ack_failures += 1
+            ack_pending = False
+
+
+        # ========================================================
+        # ¿Podemos retransmitir?
+        # ========================================================
+        if retransmissions >= MAX_DATA_RETRIES:
+            break
+
+        # ========================================================
+        # DATA retry
+        # ========================================================
+        retransmissions += 1
+        data_attempts += 1
+
+
+        # --------------------------------------------------------
+        # El sender retransmite exactamente el mismo frame.
+        # NO:
+        #   - vuelve a cifrar,
+        #   - vuelve a firmar,
+        #   - recalcula policy,
+        #   - recalcula checkpoint.
+        # Por tanto:
+        #       t_verif_s = 0
+        # --------------------------------------------------------
+
+        (
+            retry_prop_ms,
+            retry_tx_ms,
+            _,
+            retry_timeout_s,
+        ) = calculate_timeout(
+            start_pos,
+            end_pos,
+            bitrate=bitrate,
+            packet_size=bits_sent,
+            proc_time_s=0.0,
+        )
+
+        # ========================================================
+        # Sender DATA retry energy
+        # ========================================================
+        e0_retry_tx = float(
+            sender_node["ResidualEnergy"]
+        )
+
+        sender_node = update_energy_node_tdma(
+            sender_node,
+            end_pos,
+            E_schedule,
+            retry_timeout_s,
+            type_packet,
+            role=role_tx,
+            action="tx",
+            verbose=VERBOSE,
+            # Ciphertext ya existente.
+            t_verif_s=0.0,
+            packet_bits=bits_sent,
+            bitrate=bitrate,
+        )
+
+        E_retry_tx = (
+            e0_retry_tx
+            - float(
+                sender_node["ResidualEnergy"]
+            )
+        )
+
+        # ========================================================
+        # Channel result for retry DATA
+        # ========================================================
+        retry_channel_success = (
+            propagate_with_probability(
+                per=per_link,
+                override_per=
+                    effective_per_override,
+            )
+        )
+
+        # ========================================================
+        # Log DATA retry TX
+        # ========================================================
+        # El sender retransmite exactamente el mismo frame.
+        # Por tanto:
+        #   lat_proc_ms = 0
+        # porque no repetimos:
+        #   - Ascon ENC
+        #   - policy selection
+        #   - signature
+        #   - checkpoint generation
+        #   - rekey
+        # ========================================================
+        log_event(
+            run_id=RUN_ID,
+            phase="data",
+            module="arq",
+            msg_type=(
+                f"DATA:{msg_type}:"
+                f"RETRY{retransmissions}:TX"
+            ),
+            sender_id=sender_id,
+            receiver_id=receiver_id,
+            cluster_id=sender_node.get("ClusterHead"),
+            start_pos=start_pos,
+            end_pos=end_pos,
+            bits_sent=bits_sent,
+            bits_received=(
+                bits_sent
+                if retry_channel_success
+                else 0
+            ),
+            payload_bits=application_payload_bits,
+
+            # Aquí success representa entrega física del retry.
+            success=bool(retry_channel_success),
+            packet_lost=not bool(retry_channel_success),
+            energy_event_type="tx",
+            energy_j=float(E_retry_tx),
+            residual_sender=sender_node["ResidualEnergy"],
+            residual_receiver=(
+                0
+                if dest == "Sink"
+                else receiver_node[
+                    "ResidualEnergy"
+                ]
+            ),
+            bitrate=bitrate,
+            freq_khz=20,
+            lat_prop_ms=float(retry_prop_ms),
+            lat_tx_ms=float(retry_tx_ms),
+
+            # El sender no vuelve a procesar crypto.
+            lat_proc_ms=0.0,
+            snr_db=snr_db,
+            per=per_link,
+            lat_dag_ms=0.0,
+            SL_db=SL_db,
+            EbN0_db=EbN0_db,
+            BER=ber,
+        )
+
+        E_retry_rx = 0.0
+        E_retry_ea_receiver = 0.0
+
+        retry_rx_proc_s = 0.0
+        retry_rx_ea_proc_s = 0.0
+
+        # Duración real de este intento DATA retry.
+        # Se determinará según éxito físico o timeout.
+        retry_elapsed_s = 0.0
+
+        # ========================================================
+        # Retry DATA physically received
+        # ========================================================
+        if retry_channel_success:
+            # ----------------------------------------------------
+            # ¿DATA ya había sido aceptado antes?
+            # Esto ocurre típicamente cuando:
+            #   DATA success
+            #   ACK lost
+            #   DATA retransmitted
+            # En ese caso asumimos duplicate detection y no
+            # repetimos procesamiento criptográfico completo.
+            # ----------------------------------------------------
+            duplicate_delivery = bool(
+                accepted_once
+            )
+
+            if not duplicate_delivery:
+                # ------------------------------------------------
+                # Esta es la PRIMERA recepción física válida del
+                # frame.
+                # El receiver debe ejecutar Ascon DEC.
+                # ------------------------------------------------
+                retry_rx_proc_s = t_dec_s
+
+                retry_decrypted = decrypt_message(
+                    shared_key,
+                    encrypted_msg
+                )
+
+                retry_accepted = (
+                    retry_decrypted is not None
+                )
+
+                # ------------------------------------------------
+                # EA verification en la primera recepción válida
+                # ------------------------------------------------
+                retry_receiver_incremental = None
+                if (
+                    retry_accepted
+                    and ea_enabled
+                    and tx_ea is not None
+                ):
+
+                    retry_receiver_incremental = (
+                        estimate_ea_incremental_processing(
+                            policy,
+                            side="receiver",
+                            checkpoint_amortization=
+                                checkpoint_factor,
+                            checkpoint_input_bytes=256,
+                            rekey_triggered=
+                                rekey_triggered,
+                            already_accounted_ops={
+                                "ASCON_AEAD_DEC"
+                            },
+                        )
+                    )
+
+                    for op, count in (
+                        retry_receiver_incremental[
+                            "incremental_operation_counts"
+                        ].items()
+                    ):
+
+                        retry_receiver_ops[op] = (
+                            float(
+                                retry_receiver_ops.get(
+                                    op,
+                                    0.0
+                                )
+                            )
+                            + float(count)
+                        )
+
+                    retry_rx_ea_proc_s = (
+                        float(
+                            retry_receiver_incremental[
+                                "incremental_processing_time_ms"
+                            ]
+                        )
+                        / 1000.0
+                    )
+            else:
+                # ------------------------------------------------
+                # El frame es un duplicado ocasionado por ACK loss.
+                # Modelo mínimo:
+                # el receiver reconoce el frame ya aceptado y
+                # simplemente vuelve a producir ACK.
+                # ------------------------------------------------
+                retry_accepted = True
+
+            # ====================================================
+            # Retry RX timing
+            # ====================================================
+            retry_receiver_total_proc_s = (
+                retry_rx_proc_s
+                + retry_rx_ea_proc_s
+            )
+
+            (
+                _,
+                _,
+                _,
+                retry_rx_timeout_s,
+            ) = calculate_timeout(
+                start_pos,
+                end_pos,
+                bitrate=bitrate,
+                packet_size=bits_sent,
+                proc_time_s=
+                    retry_receiver_total_proc_s,
+            )
+
+            # ====================================================
+            # Retry RX energy
+            # ====================================================
+            if dest != "Sink":
+                e0_retry_rx = float(
+                    receiver_node["ResidualEnergy"]
+                )
+
+                receiver_node = update_energy_node_tdma(
+                    receiver_node,
+                    start_pos,
+                    E_schedule,
+                    retry_rx_timeout_s,
+                    type_packet,
+                    role=role_rx,
+                    action="rx",
+                    verbose=VERBOSE,
+                    # Ascon DEC únicamente cuando corresponde
+                    # una primera recepción válida.
+                    t_verif_s=
+                        retry_rx_proc_s,
+
+                    packet_bits=bits_sent,
+                    bitrate=bitrate,
+                )
+
+                E_retry_rx = (
+                    e0_retry_rx
+                    - float(
+                        receiver_node[
+                            "ResidualEnergy"
+                        ]
+                    )
+                )
+
+                # ------------------------------------------------
+                # EA receiver processing durante retry
+                # ------------------------------------------------
+                if (
+                    not duplicate_delivery
+                    and retry_accepted
+                    and ea_enabled
+                    and tx_ea is not None
+                    and retry_receiver_incremental
+                        is not None
+                ):
+                    retry_receiver_inc_mj = float(
+                        retry_receiver_incremental[
+                            "incremental_processing_energy_mj"
+                        ]
+                    )
+                    E_retry_ea_receiver = (
+                        apply_incremental_processing_energy(
+                            receiver_node,
+                            retry_receiver_inc_mj,
+                        )
+                    )
+
+            # ====================================================
+            # Processing-time bookkeeping
+            # ====================================================
+            # ASCON DEC se ejecuta siempre que esta sea la primera
+            # recepción física del frame, incluso si finalmente falla
+            # la autenticación.
+            # EA verification, en cambio, solo se ejecuta cuando Ascon
+            # aceptó previamente el frame.
+            # ====================================================
+            if not duplicate_delivery:
+                # Ascon DEC/verify fue realmente ejecutado.
+                retry_base_processing_time_s += (
+                    retry_rx_proc_s
+                )
+                # Procesamiento EA solo si Ascon aceptó el frame.
+                if retry_accepted:
+                    retry_ea_processing_time_s += (
+                        retry_rx_ea_proc_s
+                    )
+
+            # ====================================================
+            # Processing-energy bookkeeping
+            # ====================================================
+            # La energía del Sink no forma parte del presupuesto
+            # energético de los nodos sumergidos.
+            # ====================================================
+            if (
+                not duplicate_delivery
+                and dest != "Sink"
+            ):
+                # Ascon DEC fue ejecutado aunque el tag resulte inválido.
+                retry_base_processing_energy_j += (
+                    energy_proc_j(
+                        retry_rx_proc_s
+                    )
+                )
+                # EA processing solo ocurre después de una aceptación
+                # Ascon válida.
+                if retry_accepted:
+                    retry_ea_processing_energy_j += (
+                        E_retry_ea_receiver
+                    )
+
+            # ====================================================
+            # Cryptographic reject during retry
+            # ====================================================
+            # Si el frame llegó físicamente pero Ascon lo rechazó,
+            # retransmitir exactamente el mismo ciphertext no tiene
+            # sentido.
+            # Se detiene el ARQ para esta transacción.
+            # ====================================================
+            if (
+                not duplicate_delivery
+                and not retry_accepted
+            ):
+                crypto_rejected = True
+                ack_pending = False
+            
+            # ====================================================
+            # Retry accepted -> ACK becomes pending
+            # ====================================================
+            if retry_accepted:
+                accepted_once = True
+                ack_pending = True
+
+            # ========================================================
+            # Log DATA retry RX - frame physically received
+            # ========================================================
+            # Distinguimos:
+            # retry_channel_success = True
+            #       el frame llegó físicamente.
+            # retry_accepted = True/False
+            #       el frame fue o no aceptado criptográficamente.
+            #
+            # Por tanto packet_lost=False aunque un tag Ascon inválido
+            # provoque retry_accepted=False.
+            # ========================================================
+            retry_rx_total_energy_j = (
+                E_retry_rx
+                + E_retry_ea_receiver
+            )
+
+            log_event(
+                run_id=RUN_ID,
+                phase="data",
+                module="arq",
+                msg_type=(
+                    f"DATA:{msg_type}:"
+                    f"RETRY{retransmissions}:RX"
+                ),
+                sender_id=sender_id,
+                receiver_id=receiver_id,
+                cluster_id=(
+                    receiver_node.get("ClusterHead")
+                    if dest != "Sink"
+                    else sender_node.get("ClusterHead")
+                ),
+                start_pos=start_pos,
+                end_pos=end_pos,
+                bits_sent=bits_sent,
+                # Solo entregamos bits útiles al protocolo si la
+                # autenticación fue válida.
+                bits_received=(
+                    bits_sent
+                    if retry_accepted
+                    else 0
+                ),
+                payload_bits=
+                    modeled_payload_bits,
+                # Resultado final de aceptación del retry.
+                success=bool(
+                    retry_accepted
+                ),
+                # El frame NO se perdió físicamente.
+                packet_lost=False,
+                energy_event_type="rx",
+                energy_j=float(
+                    retry_rx_total_energy_j
+                ),
+                residual_sender=
+                    sender_node[
+                        "ResidualEnergy"
+                    ],
+                residual_receiver=(
+                    0
+                    if dest == "Sink"
+                    else receiver_node[
+                        "ResidualEnergy"
+                    ]
+                ),
+                bitrate=bitrate,
+                freq_khz=20,
+                lat_prop_ms=float(
+                    retry_prop_ms
+                ),
+                lat_tx_ms=float(
+                    retry_tx_ms
+                ),
+                lat_proc_ms=(
+                    retry_receiver_total_proc_s
+                    * 1000.0
+                ),
+                snr_db=snr_db,
+                per=per_link,
+                lat_dag_ms=0.0,
+                SL_db=SL_db,
+                EbN0_db=EbN0_db,
+                BER=ber,
+            )
+
+            # ----------------------------------------------------
+            # Duración del retry recibido correctamente.
+            # Incluye:
+            #   propagation
+            #   + airtime
+            #   + procesamiento RX realmente ejecutado
+            # Todavía NO actualizamos link_extra_latency_s aquí.
+            # Se hará una sola vez al final del intento.
+            # ----------------------------------------------------
+            retry_elapsed_s = (
+                (
+                    retry_prop_ms
+                    + retry_tx_ms
+                )
+                / 1000.0
+                + retry_receiver_total_proc_s
+            )
+
+        # ========================================================
+        # Retry DATA lost
+        # ========================================================
+        else:
+            if (
+                dest != "Sink"
+                and "ResidualEnergy"
+                    in receiver_node
+            ):
+
+                e0_retry_failed_rx = float(
+                    receiver_node[
+                        "ResidualEnergy"
+                    ]
+                )
+
+                receiver_node = (
+                    update_energy_failed_rx(
+                        receiver_node,
+                        start_pos,
+                        retry_timeout_s,
+                        role=role_rx,
+                        verbose=VERBOSE,
+                    )
+                )
+
+                E_retry_rx = (
+                    e0_retry_failed_rx
+                    - float(
+                        receiver_node[
+                            "ResidualEnergy"
+                        ]
+                    )
+                )
+
+            # ========================================================
+            # Log DATA retry RX - physical loss
+            # ========================================================
+            log_event(
+                run_id=RUN_ID,
+                phase="data",
+                module="arq",
+                msg_type=(
+                    f"DATA:{msg_type}:"
+                    f"RETRY{retransmissions}:RX"
+                ),
                 sender_id=sender_id,
                 receiver_id=receiver_id,
                 cluster_id=(
@@ -1724,22 +2956,33 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 end_pos=end_pos,
                 bits_sent=bits_sent,
                 bits_received=0,
-                payload_bits=modeled_payload_bits,
+                payload_bits=
+                    modeled_payload_bits,
                 success=False,
                 packet_lost=True,
                 energy_event_type="rx",
-                energy_j=E_rx,
+                energy_j=float(
+                    E_retry_rx
+                ),
                 residual_sender=
-                    sender_node["ResidualEnergy"],
+                    sender_node[
+                        "ResidualEnergy"
+                    ],
                 residual_receiver=(
                     0
                     if dest == "Sink"
-                    else receiver_node["ResidualEnergy"]
+                    else receiver_node[
+                        "ResidualEnergy"
+                    ]
                 ),
                 bitrate=bitrate,
                 freq_khz=20,
-                lat_prop_ms=t_prop_s * 1000.0,
-                lat_tx_ms=t_tx_s * 1000.0,
+                lat_prop_ms=float(
+                    retry_prop_ms
+                ),
+                lat_tx_ms=float(
+                    retry_tx_ms
+                ),
                 lat_proc_ms=0.0,
                 snr_db=snr_db,
                 per=per_link,
@@ -1749,16 +2992,157 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 BER=ber,
             )
 
-        else:
-            E_rx = 0.0
+            # ----------------------------------------------------
+            # Retry físicamente perdido.
+            #
+            # El protocolo permanece ocupado hasta el timeout.
+            # ----------------------------------------------------
+            retry_elapsed_s = float(
+                retry_timeout_s
+            )
 
-        E_rx_total = E_rx
-    ##################################
+
+        # ========================================================
+        # Retry elapsed time + standby accounting
+        # ========================================================
+        # Esta sección se ejecuta exactamente UNA vez por DATA retry,
+        # independientemente de si el retry:
+        #   - llegó y fue aceptado;
+        #   - llegó y fue rechazado criptográficamente;
+        #   - se perdió físicamente.
+        # El mismo intervalo se usa para:
+        #   1. latencia adicional ARQ;
+        #   2. standby de los nodos no participantes.
+        # ========================================================
+        link_extra_latency_s += (
+            retry_elapsed_s
+        )
+
+        # ========================================================
+        # Standby durante el slot DATA retry
+        # ========================================================
+        # retry_elapsed_s:
+        #     latencia real observada.
+        # retry_timeout_s:
+        #     duración reservada del slot TDMA y, por tanto,
+        #     intervalo utilizado para energía standby.
+        # ========================================================
+        retry_standby_s = float(
+            retry_timeout_s
+        )
+
+        if retry_standby_s > 0.0:
+            nodes = update_energy_standby_others(
+                nodes,
+                active_ids,
+                active_cluster_id,
+                retry_standby_s,
+                verbose=VERBOSE,
+            )
+            arq_standby_time_s += (
+                retry_standby_s
+            )
+        #######
+
+        # ========================================================
+        # Total energy of this DATA retry
+        # ========================================================
+        retry_data_energy_j += (
+            E_retry_tx
+            + E_retry_rx
+            + E_retry_ea_receiver
+        )
+
+    # ============================================================
+    # Final logical DATA result
+    # ============================================================
+    success = bool(
+        accepted_once
+    )
+
+    bits_rcv = (
+        bits_sent
+        if success
+        else 0
+    )
+
+    ###
+    # ============================================================
+    # Retry statistics
+    # ============================================================
+    # Estos contadores serán posteriormente la fuente de Ret_i(t).
+    # No calculamos todavía aquí el riesgo SR.
+    # Solo almacenamos observaciones reales.
+    # ============================================================
+    if ea_ctx is not None:
+        retry_stats = ea_ctx.setdefault(
+            "_retry_stats",
+            {}
+        )
+
+        node_retry_stats = (
+            retry_stats.setdefault(
+                int(sender_id),
+                {
+                    "logical_tx": 0,
+                    "data_attempts": 0,
+                    "retransmissions": 0,
+                    "ack_attempts": 0,
+                    "ack_failures": 0,
+                }
+            )
+        )
+
+        node_retry_stats[
+            "logical_tx"
+        ] += 1
+
+        node_retry_stats[
+            "data_attempts"
+        ] += int(data_attempts)
+
+        node_retry_stats[
+            "retransmissions"
+        ] += int(retransmissions)
+
+        node_retry_stats[
+            "ack_attempts"
+        ] += int(ack_attempts)
+
+        node_retry_stats[
+            "ack_failures"
+        ] += int(ack_failures)
+    ###
 
     ####
     # ============================================================
     # Energy decomposition - common to Static and EA
     # ============================================================
+    # Este bloque se ejecuta DESPUÉS del ARQ.
+    # Por tanto integra:
+    #   1. Primera transmisión DATA/AGG.
+    #   2. Procesamiento criptográfico inicial.
+    #   3. ACK(s).
+    #   4. DATA retry/retries.
+    #   5. Procesamiento RX ocurrido durante retries.
+    #
+    # La identidad que debe cumplirse es:
+    #   E_total =
+    #       E_communication
+    #       + E_base_processing
+    #       + E_EA_processing
+    #
+    # ============================================================
+
+    # ============================================================
+    # A) INITIAL DATA EVENT
+    # ============================================================
+    # E_tx y E_rx corresponden únicamente al PRIMER intento DATA.
+    # IMPORTANTE:
+    # E_tx / E_rx ya contienen el procesamiento base Ascon
+    # contabilizado mediante update_energy_node_tdma().
+    # ============================================================
+
     sender_base_event_energy_mj = (
         float(E_tx) * 1000.0
     )
@@ -1767,6 +3151,9 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         float(E_rx) * 1000.0
     )
 
+    # ------------------------------------------------------------
+    # EA incremental energy actually accounted during INITIAL event
+    # ------------------------------------------------------------
     ea_sender_incremental_mj = (
         float(E_ea_sender) * 1000.0
     )
@@ -1775,12 +3162,22 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         float(E_ea_receiver) * 1000.0
     )
 
-    ea_incremental_energy_mj = (
+    initial_ea_incremental_energy_mj = (
         ea_sender_incremental_mj
         + ea_receiver_incremental_mj
     )
 
-    # Base cryptographic processing already included in E_tx/E_rx
+    # ============================================================
+    # B) INITIAL BASE PROCESSING
+    # ============================================================
+    # Sender:
+    #       Ascon ENC siempre se ejecuta una vez.
+    # Receiver:
+    #       Ascon DEC/verify únicamente si el primer frame llegó
+    #       físicamente y se intentó descifrar.
+    #
+    # Para el Sink no incluimos energía en el presupuesto UWSN.
+    # ============================================================
     base_sender_proc_mj = (
         energy_proc_j(t_enc_s)
         * 1000.0
@@ -1790,47 +3187,152 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         rx_decrypt_attempted
         and dest != "Sink"
     ):
+
         base_receiver_proc_mj = (
-            energy_proc_j(t_proc_rx_s)
+            energy_proc_j(
+                t_proc_rx_s
+            )
             * 1000.0
         )
     else:
         base_receiver_proc_mj = 0.0
 
-    base_processing_energy_mj = (
+    initial_base_processing_energy_mj = (
         base_sender_proc_mj
         + base_receiver_proc_mj
     )
 
-    # Non-computational component
-    communication_energy_mj = max(
-        0.0,
-        sender_base_event_energy_mj
-        + receiver_base_event_energy_mj
-        - base_processing_energy_mj
+    # ============================================================
+    # C) RETRY PROCESSING
+    # ============================================================
+    # Durante una retransmisión NO volvemos a ejecutar Ascon ENC
+    # en el sender porque retransmitimos el mismo ciphertext.
+    # Sin embargo, si el primer DATA se perdió y el retry llega por
+    # primera vez al receiver, éste sí ejecuta:
+    #       Ascon DEC
+    #       + EA receiver processing
+    # retry_*_processing_energy_j fue acumulado dentro del loop ARQ.
+    # ============================================================
+    retry_base_processing_energy_mj = (
+        float(
+            retry_base_processing_energy_j
+        )
+        * 1000.0
     )
 
-    # Total processing
+    retry_ea_incremental_energy_mj = (
+        float(
+            retry_ea_processing_energy_j
+        )
+        * 1000.0
+    )
+
+    # ============================================================
+    # D) TOTAL PROCESSING ENERGY
+    # ============================================================
+    base_processing_energy_mj = (
+        initial_base_processing_energy_mj
+        + retry_base_processing_energy_mj
+    )
+
+    ea_incremental_energy_mj = (
+        initial_ea_incremental_energy_mj
+        + retry_ea_incremental_energy_mj
+    )
+
     total_processing_energy_mj = (
         base_processing_energy_mj
         + ea_incremental_energy_mj
     )
 
-    # Actual sender/receiver event energy
+    # ============================================================
+    # E) INITIAL COMMUNICATION ENERGY
+    # ============================================================
+    # El primer E_tx + E_rx incluye procesamiento base.
+    # Lo eliminamos para obtener el componente estrictamente
+    # asociado a comunicación/listening/timeout.
+    # IMPORTANTE:
+    # restamos SOLO el procesamiento del evento inicial.
+    # ============================================================
+    initial_communication_energy_mj = max(
+        0.0,
+        sender_base_event_energy_mj
+        + receiver_base_event_energy_mj
+        - initial_base_processing_energy_mj
+    )
+
+    # ============================================================
+    # F) ACK + RETRY ENERGY
+    # ============================================================
+    # retry_data_energy_j contiene:
+    #   DATA retry TX
+    #   + retry RX/listening
+    #   + EA receiver processing durante retry
+    # ack_energy_j contiene:
+     #   ACK TX
+    #   + ACK RX/listening/timeout
+    # ============================================================
+    link_extra_energy_mj = (
+        float(
+            retry_data_energy_j
+            + ack_energy_j
+        )
+        * 1000.0
+    )
+
+    # ------------------------------------------------------------
+    # Parte computacional contenida dentro de retry_data_energy_j
+    # ------------------------------------------------------------
+    retry_processing_energy_mj = (
+        retry_base_processing_energy_mj
+        + retry_ea_incremental_energy_mj
+    )
+
+    # ------------------------------------------------------------
+    # Comunicación adicional del ARQ
+    # ------------------------------------------------------------
+    retry_communication_energy_mj = max(
+        0.0,
+
+        link_extra_energy_mj
+        - retry_processing_energy_mj
+    )
+
+    # ============================================================
+    # G) TOTAL COMMUNICATION ENERGY
+    # ============================================================
+    communication_energy_mj = (
+        initial_communication_energy_mj
+        + retry_communication_energy_mj
+    )
+
+    # ============================================================
+    # H) INITIAL TOTAL EVENT ENERGY
+    # ============================================================
+    # Estos valores describen únicamente el primer DATA.
+    # No incluyen ACK ni retry.
+    # ============================================================
     sender_total_event_energy_mj = (
         sender_base_event_energy_mj
         + ea_sender_incremental_mj
     )
-
     receiver_total_event_energy_mj = (
         receiver_base_event_energy_mj
         + ea_receiver_incremental_mj
     )
 
-    total_energy_mj = (
+    initial_total_event_energy_mj = (
         sender_total_event_energy_mj
         + receiver_total_event_energy_mj
-    ) 
+    )
+
+    # ============================================================
+    # I) FINAL ENERGY INCLUDING ARQ
+    # ============================================================
+    total_energy_mj = (
+        initial_total_event_energy_mj
+        + link_extra_energy_mj
+    )
     ####
 
     ### 
@@ -1858,16 +3360,37 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # --------------------------------------------------------
 
         tx_ea.setdefault("ea_state", {})
-        tx_ea["ea_state"]["channel_success"] = bool(channel_success)
+        tx_ea["ea_state"]["initial_channel_success"] = bool(channel_success)
         tx_ea["ea_state"]["accepted"] = bool(success)
         tx_ea["ea_state"]["snr_db"] = snr_db
         tx_ea["ea_state"]["per_link"] = per_link
         tx_ea["ea_state"]["ber"] = ber
         tx_ea["ea_state"]["distance_m"] = distance
+        tx_ea["ea_state"]["logical_delivery_success"] = bool(success)
+        tx_ea["ea_state"]["ack_confirmed"] = bool(ack_confirmed)
+        tx_ea["ea_state"]["retransmissions"] = int(retransmissions)
 
         # ========================================================
         # Store the energy decomposition already computed above
         # ========================================================
+        #ea_cost.update #3 
+        # ========================================================
+        # FINAL ENERGY + ARQ ACCOUNTING
+        # ========================================================
+        #
+        # Este bloque se ejecuta cuando ya conocemos:
+        #
+        #   - energía del primer DATA
+        #   - energía RX inicial
+        #   - ACK(s)
+        #   - DATA retry/retries
+        #   - procesamiento base durante retry
+        #   - procesamiento EA durante retry
+        #
+        # Por tanto este es el lugar correcto para guardar
+        # los contadores y costes finales del ARQ.
+        # ========================================================
+
         ea_cost = tx_ea.setdefault(
             "ea_cost",
             {}
@@ -1875,32 +3398,19 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
         ea_cost.update({
             # ----------------------------------------------------
-            # Base U-Tangle event energy
+            # Initial DATA event
             # ----------------------------------------------------
             "sender_base_event_energy_mj":
                 sender_base_event_energy_mj,
             "receiver_base_event_energy_mj":
                 receiver_base_event_energy_mj,
-
-            # ----------------------------------------------------
-            # Complete sender/receiver event energy
-            # including EA incremental processing
-            # ----------------------------------------------------
             "sender_total_event_energy_mj":
                 sender_total_event_energy_mj,
             "receiver_total_event_energy_mj":
                 receiver_total_event_energy_mj,
 
             # ----------------------------------------------------
-            # Compatibility fields
-            # ----------------------------------------------------
-            "tx_energy_mj":
-                sender_total_event_energy_mj,
-            "rx_energy_mj":
-                receiver_total_event_energy_mj,
-
-            # ----------------------------------------------------
-            # Processing decomposition
+            # Processing
             # ----------------------------------------------------
             "base_processing_energy_mj":
                 base_processing_energy_mj,
@@ -1914,18 +3424,135 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 total_processing_energy_mj,
 
             # ----------------------------------------------------
-            # Acoustic / non-processing component
+            # Communication
             # ----------------------------------------------------
             "communication_energy_mj":
                 communication_energy_mj,
 
+            # ====================================================
+            # MINIMAL ACK / ARQ
+            # ====================================================
+            # Total DATA attempts:
+            #   1 = first transmission only
+            #   2 = first transmission + one retry
+            "data_attempts":
+                int(data_attempts),
+
+            # Number of actual DATA retransmissions.
+            "retransmissions":
+                int(retransmissions),
+
+            # Number of ACK frames generated.
+            "ack_attempts":
+                int(ack_attempts),
+
+            # Number of ACK frames lost.
+            "ack_failures":
+                int(ack_failures),
+
+            # Sender received a final ACK.
+            "ack_confirmed":
+                bool(ack_confirmed),
+
+            # Standby generated by ARQ
+            "arq_standby_time_ms":
+                float(
+                    arq_standby_time_s
+                    * 1000.0
+                ),
+
+            "other_nodes_arq_standby_accounted":
+                True,
+
             # ----------------------------------------------------
-            # Total event energy
+            # ARQ energy decomposition
             # ----------------------------------------------------
+            # DATA retransmissions only.
+            "retry_data_energy_mj":
+                float(
+                    retry_data_energy_j
+                    * 1000.0
+                ),
+
+            # ACK TX + RX/listening energy.
+            "ack_energy_mj":
+                float(
+                    ack_energy_j
+                    * 1000.0
+                ),
+
+            # Extra ARQ energy = retries + ACKs.
+            "arq_overhead_energy_mj":
+                float(
+                    (
+                        retry_data_energy_j
+                        + ack_energy_j
+                    )
+                    * 1000.0
+                ),
+
+            # Mantener este campo por compatibilidad,
+            # pero que represente SOLO DATA retransmitido.
+            "retransmission_energy_mj":
+                float(
+                    retry_data_energy_j
+                    * 1000.0
+                ),
+
+            # ----------------------------------------------------
+            # Retry processing
+            # ----------------------------------------------------
+            "retry_base_processing_energy_mj":
+                float(
+                    retry_base_processing_energy_mj
+                ),
+
+            "retry_ea_processing_energy_mj":
+                float(
+                    retry_ea_incremental_energy_mj
+                ),
+
+            # ----------------------------------------------------
+            # ARQ communication / processing decomposition
+            # ----------------------------------------------------
+
+            "initial_communication_energy_mj":
+                float(
+                    initial_communication_energy_mj
+                ),
+
+            "retry_communication_energy_mj":
+                float(
+                    retry_communication_energy_mj
+                ),
+
+            "link_extra_energy_mj":
+                float(
+                    link_extra_energy_mj
+                ),
+
+            "initial_total_event_energy_mj":
+                float(
+                    initial_total_event_energy_mj
+                ),
+            
+            # ----------------------------------------------------
+            # Final totals
+            # ----------------------------------------------------
+            "tx_energy_mj":
+                sender_total_event_energy_mj,
+
+            "rx_energy_mj":
+                receiver_total_event_energy_mj,
+
             "total_energy_mj":
                 total_energy_mj,
+
             "energy_scope":
-                "MEASURED_EVENT_PLUS_EA_INCREMENTAL",
+                "ACTIVE_HOP_PLUS_ACK_ARQ",
+
+            "network_standby_in_residual_energy":
+                True,
         })
        
         ###
@@ -1964,11 +3591,15 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # --------------------------------------------------------
         base_processing_time_ms = (
             t_enc_s
+
             + (
                 t_proc_rx_s
                 if rx_decrypt_attempted
                 else 0.0
             )
+
+            + retry_base_processing_time_s
+
         ) * 1000.0
 
         # --------------------------------------------------------
@@ -1986,6 +3617,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         ea_incremental_time_ms = (
             sender_ea_proc_s
             + receiver_ea_proc_s
+            + retry_ea_processing_time_s
         ) * 1000.0
 
         # --------------------------------------------------------
@@ -2004,6 +3636,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         #       EA incremental crypto time
         # sin reconstruir los valores desde otros campos del CSV.
         # --------------------------------------------------------
+
+        # ea_cost.update #4
         ea_cost.update({
             "base_processing_time_ms":
                 base_processing_time_ms,
@@ -2013,6 +3647,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
             "processing_time_ms":
                 total_processing_time_ms,
+
+            # Tiempo adicional introducido exclusivamente por
+            # ACK / timeout / DATA retry.
+            "arq_extra_latency_ms":
+                float(link_extra_latency_s * 1000.0),
 
             # ----------------------------------------------------
             # Campo legado.
@@ -2024,23 +3663,26 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             # ----------------------------------------------------
             "crypto_time_ms":
                 total_processing_time_ms,
+
+            
         })
 
         # ========================================================
-        # LATENCY R1
+        # FINAL END-TO-END HOP LATENCY
         # ========================================================
-
-        # Sender:
-        #   ASCON ENC + procesamiento EA
-        #
-        # Receiver:
-        #   ASCON DEC + procesamiento EA
-        #
-        # Si el paquete se pierde:
-        #   receiver_ea_proc_s = 0
-        #   t_proc_rx_s = 0
+        # Primera transmisión:
+        #   propagation
+        #   + DATA airtime
+        #   + Ascon ENC
+        #   + EA sender processing
+        #   + Ascon DEC
+        #   + EA receiver processing
+        # ARQ:
+        #   + ACK airtime/propagation or timeout
+        #   + DATA retransmission(s), if required
+        #   + retry receiver processing, if required
+        # link_extra_latency_s ya contiene todo el componente ARQ.
         # ========================================================
-
         total_latency_ms = (
             t_prop_s
             + t_tx_s
@@ -2048,6 +3690,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             + sender_ea_proc_s
             + t_proc_rx_s
             + receiver_ea_proc_s
+            + link_extra_latency_s
         ) * 1000.0
 
         ###
@@ -2055,9 +3698,27 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             tx_ea.get("ea_cost", {}).get("sender_incremental_ops", {})
         )
 
-        receiver_ops = (
-            tx_ea.get("ea_cost", {}).get("receiver_incremental_ops", {})
+        initial_receiver_ops = (
+            tx_ea.get("ea_cost", {}).get(
+                "receiver_incremental_ops",
+                {}
+            )
         )
+
+        receiver_ops = dict(initial_receiver_ops)
+
+        for op, count in (retry_receiver_ops.items()):
+            receiver_ops[op] = (
+                float(
+                    receiver_ops.get(
+                        op,
+                        0.0
+                    )
+                )
+                + float(count)
+            )
+
+        ea_cost["retry_receiver_ops"] = retry_receiver_ops
 
         all_ops = (
             set(sender_ops)
