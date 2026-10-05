@@ -1,0 +1,94 @@
+
+#####
+#Estadisticas EA
+#####
+
+sudo apt update
+sudo apt install build-essential libssl-dev
+
+#
+gcc --version
+openssl version
+uname -a
+lscpu
+
+#bash conversión
+gcc -O3 \
+    -std=c11 \
+    -Wall \
+    -Wextra \
+    -D_POSIX_C_SOURCE=200809L \
+    bench_ea_extra_ops.c \
+    -o bench_ea_extra_ops \
+    -lcrypto \
+    -lm
+
+# campaña de prueba
+EA_BENCH_SAMPLES=10000 \
+EA_BENCH_BATCH=100 \
+EA_P_PROC_W=0.10 \
+./bench_ea_extra_ops
+
+# bash
+date
+uname -a
+lscpu
+gcc --version
+openssl version
+vcgencmd measure_temp
+vcgencmd get_throttled
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+
+#campañas
+for i in 1 2 3 4 5
+do
+    echo "===== RUN $i BEFORE ====="
+    date
+    vcgencmd measure_temp
+    vcgencmd get_throttled
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+
+    EA_BENCH_SAMPLES=10000 \
+    EA_BENCH_BATCH=100 \
+    EA_P_PROC_W=0.10 \
+    ./bench_ea_extra_ops
+
+    echo "===== RUN $i AFTER ====="
+    vcgencmd measure_temp
+    vcgencmd get_throttled
+    cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq
+
+    mv ea_bench_samples.csv \
+       results/ea_bench_samples_run${i}.csv
+
+    mv ea_bench_summary.csv \
+       results/ea_bench_summary_run${i}.csv
+
+    sleep 60
+done
+
+
+######
+#Estadisticas de criptograficas
+#####
+
+sudo apt update
+sudo apt install build-essential libssl-dev
+
+
+gcc -O3 \
+    -std=c11 \
+    -Wall \
+    -Wextra \
+    -D_POSIX_C_SOURCE=200809L \
+    bench_utangle_crypto.c \
+    -o bench_utangle_crypto \
+    -lcrypto \
+    -lm
+
+UT_BENCH_SAMPLES=10000 \
+UT_BENCH_FAST_BATCH=100 \
+UT_BENCH_MEDIUM_BATCH=20 \
+UT_BENCH_SLOW_BATCH=5 \
+UT_P_PROC_W=0.10 \
+./bench_utangle_crypto

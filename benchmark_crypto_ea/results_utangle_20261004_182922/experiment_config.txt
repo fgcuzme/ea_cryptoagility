@@ -1,0 +1,12 @@
+experiment=UTANGLE_CRYPTO_RPI3
+timestamp=20261004_182922
+
+samples=10000
+fast_batch=100
+medium_batch=20
+slow_batch=5
+
+P_PROC_W=0.10
+
+benchmark_binary=./bench_utangle_crypto
+benchmark_source=./bench_utangle_crypto.c

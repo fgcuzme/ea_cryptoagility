@@ -1,0 +1,23 @@
+============================================================
+SYSTEM INFORMATION - AFTER BENCHMARK
+============================================================
+
+DATE
+dom 04 oct 2026 18:48:34 -05
+
+TEMPERATURE
+temp=67.7'C
+
+THROTTLED STATE
+throttled=0x80008
+
+CPU CURRENT FREQUENCY
+1400000
+
+MEMORY
+               total       usado       libre  compartido   búf/caché   disponible
+Mem:           907Mi       395Mi       172Mi        17Mi       409Mi       511Mi
+Inter:         199Mi       512Ki       199Mi
+
+UPTIME / LOAD
+ 18:48:34 up  5:09,  2 users,  load average: 1,00, 1,00, 0,91

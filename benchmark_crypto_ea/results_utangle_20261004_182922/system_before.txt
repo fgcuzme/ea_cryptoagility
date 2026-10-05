@@ -1,0 +1,89 @@
+============================================================
+SYSTEM INFORMATION - BEFORE BENCHMARK
+============================================================
+
+DATE
+dom 04 oct 2026 18:29:22 -05
+
+UNAME
+Linux raspberrypi 6.6.74+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.6.74-1+rpt1 (2025-01-27) aarch64 GNU/Linux
+
+CPU
+Architecture:                         aarch64
+CPU op-mode(s):                       32-bit, 64-bit
+Byte Order:                           Little Endian
+CPU(s):                               4
+On-line CPU(s) list:                  0-3
+Vendor ID:                            ARM
+Model name:                           Cortex-A53
+Model:                                4
+Thread(s) per core:                   1
+Core(s) per cluster:                  4
+Socket(s):                            -
+Cluster(s):                           1
+Stepping:                             r0p4
+CPU(s) scaling MHz:                   100%
+CPU max MHz:                          1400,0000
+CPU min MHz:                          600,0000
+BogoMIPS:                             38,40
+Flags:                                fp asimd evtstrm crc32 cpuid
+L1d cache:                            128 KiB (4 instances)
+L1i cache:                            128 KiB (4 instances)
+L2 cache:                             512 KiB (1 instance)
+NUMA node(s):                         1
+NUMA node0 CPU(s):                    0-3
+Vulnerability Gather data sampling:   Not affected
+Vulnerability Itlb multihit:          Not affected
+Vulnerability L1tf:                   Not affected
+Vulnerability Mds:                    Not affected
+Vulnerability Meltdown:               Not affected
+Vulnerability Mmio stale data:        Not affected
+Vulnerability Reg file data sampling: Not affected
+Vulnerability Retbleed:               Not affected
+Vulnerability Spec rstack overflow:   Not affected
+Vulnerability Spec store bypass:      Not affected
+Vulnerability Spectre v1:             Mitigation; __user pointer sanitization
+Vulnerability Spectre v2:             Not affected
+Vulnerability Srbds:                  Not affected
+Vulnerability Tsx async abort:        Not affected
+
+GCC
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+
+OPENSSL
+OpenSSL 3.0.22 25 Aug 2026 (Library: OpenSSL 3.0.22 25 Aug 2026)
+built on: Wed Sep 23 03:52:17 2026 UTC
+platform: debian-arm64
+options:  bn(64,64)
+compiler: gcc -fPIC -pthread -Wa,--noexecstack -Wall -fzero-call-used-regs=used-gpr -DOPENSSL_TLS_SECURITY_LEVEL=2 -Wa,--noexecstack -g -O2 -ffile-prefix-map=/build/reproducible-path/openssl-3.0.22=. -fstack-protector-strong -Wformat -Werror=format-security -DOPENSSL_USE_NODELETE -DOPENSSL_PIC -DOPENSSL_BUILDING_OPENSSL -DNDEBUG -Wdate-time -D_FORTIFY_SOURCE=2
+OPENSSLDIR: "/usr/lib/ssl"
+ENGINESDIR: "/usr/lib/aarch64-linux-gnu/engines-3"
+MODULESDIR: "/usr/lib/aarch64-linux-gnu/ossl-modules"
+Seeding source: os-specific
+CPUINFO: OPENSSL_armcap=0x81
+
+TEMPERATURE
+temp=60.7'C
+
+THROTTLED STATE
+throttled=0x80008
+
+CPU GOVERNOR
+ondemand
+
+CPU CURRENT FREQUENCY
+1400000
+
+CPU MIN FREQUENCY
+600000
+
+CPU MAX FREQUENCY
+1400000
+
+MEMORY
+               total       usado       libre  compartido   búf/caché   disponible
+Mem:           907Mi       396Mi       174Mi        17Mi       406Mi       510Mi
+Inter:         199Mi       512Ki       199Mi
+
+UPTIME / LOAD
+ 18:29:22 up  4:50,  2 users,  load average: 0,21, 0,33, 0,53

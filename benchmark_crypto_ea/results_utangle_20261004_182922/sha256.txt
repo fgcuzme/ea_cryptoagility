@@ -1,0 +1,5 @@
+============================================================
+SHA256
+============================================================
+ea9f3a95ef9dee8cb08b03dcf725fed9ff8de39dafb53bff6cc6bd83c46947d2  ./bench_utangle_crypto.c
+bea857cfc449815da4f941279cc7b3e75608ab88cfbd9ba119702949de4be62c  ./bench_utangle_crypto

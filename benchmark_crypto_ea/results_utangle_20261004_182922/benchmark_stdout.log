@@ -1,0 +1,88 @@
+U-Tangle cryptographic microbenchmark
+OpenSSL: OpenSSL 3.0.22 25 Aug 2026
+samples=10000 fast_batch=100 medium_batch=20 slow_batch=5 warmup=1000 P_PROC=0.100000 W
+
+ASCON-128 v1.2 cross-check vector (compare with Python U-Tangle):
+key   = 000102030405060708090a0b0c0d0e0f
+nonce = 101112131415161718191a1b1c1d1e1f
+ad    = 202122232425262728292a2b2c2d2e2f
+msg   = 404142434445464748494a4b4c4d4e4f505152535455565758595a5b5c5d5e5f
+cttag = 7e8977abbd67c794d7e98c32a382a097d0e85baccb96aa2661fb3743ff9774713867c1fd57686e73697d47e88edfd58b
+
+ED25519_KEYGEN                   median=359.083200 us  mean=372.189387 us  p95=438.583400 us  Emed=0.035908320 mJ
+ED25519_SIGN_32                  median=330.046900 us  mean=332.156270 us  p95=342.210950 us  Emed=0.033004690 mJ
+ED25519_VERIFY_32                median=579.213500 us  mean=586.740633 us  p95=632.549450 us  Emed=0.057921350 mJ
+ED25519_SIGN_64                  median=331.169250 us  mean=332.985098 us  p95=342.635400 us  Emed=0.033116925 mJ
+ED25519_VERIFY_64                median=580.585925 us  mean=584.786717 us  p95=609.380200 us  Emed=0.058058593 mJ
+ED25519_SIGN_128                 median=332.406250 us  mean=334.566665 us  p95=348.028650 us  Emed=0.033240625 mJ
+ED25519_VERIFY_128               median=576.054700 us  mean=576.998231 us  p95=578.359400 us  Emed=0.057605470 mJ
+ED25519_SIGN_256                 median=334.492200 us  mean=334.944416 us  p95=336.028600 us  Emed=0.033449220 mJ
+ED25519_VERIFY_256               median=575.382800 us  mean=576.419365 us  p95=577.731750 us  Emed=0.057538280 mJ
+X25519_KEYGEN                    median=346.812500 us  mean=347.704375 us  p95=351.156200 us  Emed=0.034681250 mJ
+X25519_DERIVE                    median=511.914050 us  mean=512.312624 us  p95=513.742150 us  Emed=0.051191405 mJ
+HKDF_SHA256_IKM32_OKM32          median=112.891150 us  mean=113.025497 us  p95=113.519800 us  Emed=0.011289115 mJ
+ASCON128_ENC_M16_AD0             median=  0.668230 us  mean=  0.673844 us  p95=  0.690630 us  Emed=0.000066823 mJ
+ASCON128_DEC_M16_AD0             median=  0.729690 us  mean=  0.734720 us  p95=  0.752080 us  Emed=0.000072969 mJ
+ASCON128_ENC_M32_AD0             median=  0.873430 us  mean=  0.879424 us  p95=  0.895830 us  Emed=0.000087343 mJ
+ASCON128_DEC_M32_AD0             median=  1.079690 us  mean=  1.087048 us  p95=  1.103120 us  Emed=0.000107969 mJ
+ASCON128_ENC_M48_AD0             median=  1.078120 us  mean=  1.085266 us  p95=  1.101560 us  Emed=0.000107812 mJ
+ASCON128_DEC_M48_AD0             median=  1.355200 us  mean=  1.364772 us  p95=  1.382300 us  Emed=0.000135520 mJ
+ASCON128_ENC_M64_AD0             median=  1.282820 us  mean=  1.291718 us  p95=  1.307290 us  Emed=0.000128282 mJ
+ASCON128_DEC_M64_AD0             median=  1.630210 us  mean=  1.641286 us  p95=  1.658330 us  Emed=0.000163021 mJ
+ASCON128_ENC_M96_AD0             median=  1.700000 us  mean=  1.712595 us  p95=  1.731250 us  Emed=0.000170000 mJ
+ASCON128_DEC_M96_AD0             median=  2.189070 us  mean=  2.203106 us  p95=  2.264060 us  Emed=0.000218907 mJ
+ASCON128_ENC_M128_AD0            median=  2.109890 us  mean=  2.124019 us  p95=  2.185410 us  Emed=0.000210989 mJ
+ASCON128_DEC_M128_AD0            median=  2.757290 us  mean=  2.756875 us  p95=  2.827610 us  Emed=0.000275729 mJ
+ASCON128_ENC_M160_AD0            median=  2.537500 us  mean=  2.536184 us  p95=  2.601560 us  Emed=0.000253750 mJ
+ASCON128_DEC_M160_AD0            median=  3.307300 us  mean=  3.313954 us  p95=  3.384900 us  Emed=0.000330730 mJ
+ASCON128_ENC_M192_AD0            median=  2.947400 us  mean=  2.948522 us  p95=  3.022920 us  Emed=0.000294740 mJ
+ASCON128_DEC_M192_AD0            median=  3.857810 us  mean=  3.864030 us  p95=  3.935420 us  Emed=0.000385781 mJ
+ASCON128_ENC_M224_AD0            median=  3.357290 us  mean=  3.359938 us  p95=  3.433340 us  Emed=0.000335729 mJ
+ASCON128_DEC_M224_AD0            median=  4.407810 us  mean=  4.416868 us  p95=  4.487500 us  Emed=0.000440781 mJ
+ASCON128_ENC_M256_AD0            median=  3.767180 us  mean=  3.773014 us  p95=  3.845320 us  Emed=0.000376718 mJ
+ASCON128_DEC_M256_AD0            median=  4.957810 us  mean=  4.970122 us  p95=  5.039060 us  Emed=0.000495781 mJ
+ASCON128_ENC_M16_AD16            median=  0.979690 us  mean=  0.987203 us  p95=  1.003640 us  Emed=0.000097969 mJ
+ASCON128_DEC_M16_AD16            median=  1.042710 us  mean=  1.049846 us  p95=  1.065630 us  Emed=0.000104271 mJ
+ASCON128_ENC_M32_AD16            median=  1.184890 us  mean=  1.193689 us  p95=  1.211450 us  Emed=0.000118489 mJ
+ASCON128_DEC_M32_AD16            median=  1.393230 us  mean=  1.402688 us  p95=  1.418750 us  Emed=0.000139323 mJ
+ASCON128_ENC_M48_AD16            median=  1.389590 us  mean=  1.399284 us  p95=  1.414060 us  Emed=0.000138959 mJ
+ASCON128_DEC_M48_AD16            median=  1.668230 us  mean=  1.679776 us  p95=  1.699480 us  Emed=0.000166823 mJ
+ASCON128_ENC_M64_AD16            median=  1.594790 us  mean=  1.605897 us  p95=  1.623950 us  Emed=0.000159479 mJ
+ASCON128_DEC_M64_AD16            median=  1.943750 us  mean=  1.956985 us  p95=  2.014580 us  Emed=0.000194375 mJ
+ASCON128_ENC_M96_AD16            median=  2.011460 us  mean=  2.024997 us  p95=  2.086460 us  Emed=0.000201146 mJ
+ASCON128_DEC_M96_AD16            median=  2.521350 us  mean=  2.519600 us  p95=  2.582290 us  Emed=0.000252135 mJ
+ASCON128_ENC_M128_AD16           median=  2.439580 us  mean=  2.437461 us  p95=  2.500000 us  Emed=0.000243958 mJ
+ASCON128_DEC_M128_AD16           median=  3.071870 us  mean=  3.072960 us  p95=  3.147920 us  Emed=0.000307187 mJ
+ASCON128_ENC_M160_AD16           median=  2.849480 us  mean=  2.852809 us  p95=  2.924480 us  Emed=0.000284948 mJ
+ASCON128_DEC_M160_AD16           median=  3.621870 us  mean=  3.627188 us  p95=  3.700520 us  Emed=0.000362187 mJ
+ASCON128_ENC_M192_AD16           median=  3.259370 us  mean=  3.261621 us  p95=  3.335940 us  Emed=0.000325937 mJ
+ASCON128_DEC_M192_AD16           median=  4.171880 us  mean=  4.180023 us  p95=  4.251560 us  Emed=0.000417188 mJ
+ASCON128_ENC_M224_AD16           median=  3.668750 us  mean=  3.673971 us  p95=  3.746870 us  Emed=0.000366875 mJ
+ASCON128_DEC_M224_AD16           median=  4.721880 us  mean=  4.733350 us  p95=  4.803650 us  Emed=0.000472188 mJ
+ASCON128_ENC_M256_AD16           median=  4.078650 us  mean=  4.086353 us  p95=  4.157820 us  Emed=0.000407865 mJ
+ASCON128_DEC_M256_AD16           median=  5.272390 us  mean=  5.286650 us  p95=  5.356770 us  Emed=0.000527239 mJ
+ASCON128_ENC_M16_AD32            median=  1.183860 us  mean=  1.191834 us  p95=  1.207290 us  Emed=0.000118386 mJ
+ASCON128_DEC_M16_AD32            median=  1.247920 us  mean=  1.256313 us  p95=  1.271360 us  Emed=0.000124792 mJ
+ASCON128_ENC_M32_AD32            median=  1.389060 us  mean=  1.398968 us  p95=  1.416150 us  Emed=0.000138906 mJ
+ASCON128_DEC_M32_AD32            median=  1.598440 us  mean=  1.608828 us  p95=  1.625520 us  Emed=0.000159844 mJ
+ASCON128_ENC_M48_AD32            median=  1.593750 us  mean=  1.604631 us  p95=  1.621350 us  Emed=0.000159375 mJ
+ASCON128_DEC_M48_AD32            median=  1.873440 us  mean=  1.886438 us  p95=  1.917190 us  Emed=0.000187344 mJ
+ASCON128_ENC_M64_AD32            median=  1.798960 us  mean=  1.810586 us  p95=  1.828650 us  Emed=0.000179896 mJ
+ASCON128_DEC_M64_AD32            median=  2.148440 us  mean=  2.162879 us  p95=  2.223950 us  Emed=0.000214844 mJ
+ASCON128_ENC_M96_AD32            median=  2.215630 us  mean=  2.230518 us  p95=  2.291670 us  Emed=0.000221563 mJ
+ASCON128_DEC_M96_AD32            median=  2.726560 us  mean=  2.725906 us  p95=  2.791140 us  Emed=0.000272656 mJ
+ASCON128_ENC_M128_AD32           median=  2.643750 us  mean=  2.642728 us  p95=  2.707290 us  Emed=0.000264375 mJ
+ASCON128_DEC_M128_AD32           median=  3.276570 us  mean=  3.279958 us  p95=  3.353640 us  Emed=0.000327657 mJ
+ASCON128_ENC_M160_AD32           median=  3.053650 us  mean=  3.054503 us  p95=  3.130210 us  Emed=0.000305365 mJ
+ASCON128_DEC_M160_AD32           median=  3.827080 us  mean=  3.832973 us  p95=  3.905210 us  Emed=0.000382708 mJ
+ASCON128_ENC_M192_AD32           median=  3.463540 us  mean=  3.474449 us  p95=  3.544270 us  Emed=0.000346354 mJ
+ASCON128_DEC_M192_AD32           median=  4.377080 us  mean=  4.386232 us  p95=  4.456770 us  Emed=0.000437708 mJ
+ASCON128_ENC_M224_AD32           median=  3.873430 us  mean=  3.881906 us  p95=  3.954170 us  Emed=0.000387343 mJ
+ASCON128_DEC_M224_AD32           median=  4.927080 us  mean=  4.939869 us  p95=  5.009900 us  Emed=0.000492708 mJ
+ASCON128_ENC_M256_AD32           median=  4.282820 us  mean=  4.291945 us  p95=  4.363540 us  Emed=0.000428282 mJ
+ASCON128_DEC_M256_AD32           median=  5.477090 us  mean=  5.493438 us  p95=  5.565620 us  Emed=0.000547709 mJ
+
+Results written to:
+  utangle_crypto_samples.csv
+  utangle_crypto_summary.csv
+sink=0/0
