@@ -1136,51 +1136,61 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
     # Physical channel outcome
     # ============================================================
+    # IMPORTANTE:
+    # channel_success representa únicamente el resultado del
+    # canal acústico:
+    #       True  -> el frame llegó físicamente
+    #       False -> el frame se perdió en el canal
+    # Todavía NO realizamos aquí el descifrado Ascon.
+    # El procesamiento RX se realizará más adelante, dentro del
+    # bloque específico del receptor.
     #
-    # channel_success indica exclusivamente que el frame acústico
-    # llegó al receptor.
-    #
-    # No implica todavía que el frame sea criptográficamente
-    # válido.
+    # Esto evita:
+    #   - ejecutar decrypt dos veces;
+    #   - confundir pérdida física con rechazo criptográfico;
+    #   - contabilizar incorrectamente energía de procesamiento.
     # ============================================================
-
     channel_success = propagate_with_probability(
         per=per_link,
         override_per=effective_per_override,
     )
 
-    # Resultado final de aceptación del paquete.
+    # ------------------------------------------------------------
+    # Resultado inicial.
+    # Si el canal entrega el paquete, inicialmente consideramos
+    # que el frame está disponible para procesamiento.
+    # Posteriormente la verificación AEAD puede hacer que:
+    #       success = False
+    # aunque:
+    #       channel_success = True
+    # ------------------------------------------------------------
     success = channel_success
 
+    # ------------------------------------------------------------
+    # packet_lost representa exclusivamente pérdida acústica.
+    # Una autenticación Ascon fallida NO debe convertirse en una
+    # pérdida de canal.
+    # ------------------------------------------------------------
     p_lost = not channel_success
 
+    # ------------------------------------------------------------
+    # Bits recibidos físicamente.
+    # Si más adelante falla la autenticación, bits_rcv puede
+    # cambiarse a 0 para representar que el paquete no fue
+    # aceptado por la capa superior.
+    # ------------------------------------------------------------
     bits_rcv = (
         bits_sent
         if channel_success
         else 0
     )
 
-    if channel_success:
-        # El receptor realmente recibió el frame y por tanto
-        # intenta la verificación AEAD.
-        rx_decrypt_attempted = True
-
-        t_proc_rx_s = t_dec_s
-
-        decrypted_msg = decrypt_message(
-            shared_key,
-            encrypted_msg
-        )
-
-        if decrypted_msg is None:
-
-            # El frame llegó físicamente, pero no fue aceptado
-            # criptográficamente.
-            success = False
-            bits_rcv = 0
-
-    # Permite distinguir energía de una operación criptográfica
-    # intentada aunque posteriormente falle la autenticación.
+    # ------------------------------------------------------------
+    # Indica si el receptor llegó realmente a ejecutar Ascon DEC.
+    # Es importante para energía:
+    # aunque la autenticación falle, el intento de descifrado
+    # consume procesamiento.
+    # ------------------------------------------------------------
     rx_decrypt_attempted = False
 
     sender_ea_proc_s = (
@@ -1281,75 +1291,184 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                                          timeout_s, verbose=VERBOSE)
 
 
-    ## Se actualiza el 8 y 9
     # ============================================================
     # 8) Si el paquete llega: energía RX + descifrado + EA policy
     # ============================================================
 
-    # Valores por defecto para evitar variables no inicializadas
+    # ------------------------------------------------------------
+    # Valores por defecto.
+    # Esto garantiza que todas las variables existan tanto en:
+    #   - Static U-Tangle
+    #   - EA-CryptoAgility
+    #   - paquete recibido
+    #   - paquete perdido
+    #   - CH
+    #   - Sink
+    # ------------------------------------------------------------
+
     E_rx = 0.0                  # J: evento RX base U-Tangle
     E_ea_receiver = 0.0         # J: procesamiento incremental EA
-    t_proc_rx_s = 0.0           # s: descifrado base
+    t_proc_rx_s = 0.0           # s: Ascon decrypt base
     receiver_ea_proc_s = 0.0    # s: procesamiento adicional EA
     receiver_incremental = None
     decrypted_msg = None
 
-    if success:
+    # ============================================================
+    # El frame llegó físicamente al receptor
+    # ============================================================
+    if channel_success:
         # --------------------------------------------------------
-        # Procesamiento base del receptor: ASCON decrypt
+        # El receptor ejecutará Ascon decrypt/authentication.
         # --------------------------------------------------------
+        rx_decrypt_attempted = True
         t_proc_rx_s = t_dec_s
+
+        # --------------------------------------------------------
+        # Operación criptográfica funcional.
+        # El tiempo utilizado por la simulación NO se mide aquí.
+        # t_dec_s proviene de la calibración Raspberry Pi 3.
+        # --------------------------------------------------------
         decrypted_msg = decrypt_message(
             shared_key,
             encrypted_msg
         )
 
+        # --------------------------------------------------------
+        # Rechazo criptográfico.
+        # El paquete llegó por el canal, por tanto:
+        #
+        #       channel_success = True
+        #       p_lost          = False
+        # pero puede no ser aceptado:
+        #       success = False
+        # Esto será importante posteriormente para las campañas
+        # de tampering y autenticación.
+        # --------------------------------------------------------
         if decrypted_msg is None:
             success = False
-            p_lost = True
+            # No se entrega payload válido a capas superiores.
             bits_rcv = 0
 
         # --------------------------------------------------------
         # Procesamiento adicional EA-CryptoAgility
+        # --------------------------------------------------------
+        #
+        # Se ejecuta únicamente cuando:
+        #   1. el frame llegó físicamente;
+        #   2. Ascon lo aceptó;
+        #   3. EA-CryptoAgility está habilitado.
         #
         # IMPORTANTE:
-        # ASCON_AEAD_DEC se excluye porque ya será contabilizado
-        # por update_energy_node_tdma(..., t_verif_s=t_dec_s).
+        # ASCON_AEAD_DEC se excluye del coste EA porque ya está
+        # contabilizado en el baseline U-Tangle mediante:
+        #       update_energy_node_tdma(
+        #           ...,
+        #           t_verif_s=t_proc_rx_s
+        #       )
+        # De esta forma evitamos doble contabilización.
         # --------------------------------------------------------
         if (
-            ea_enabled
+            success
+            and ea_enabled
             and tx_ea is not None
-            # and dest != "Sink"
         ):
 
             receiver_incremental = (
                 estimate_ea_incremental_processing(
                     policy,
                     side="receiver",
-                    # Mismo evento checkpoint que transportó el sender.
-                    # Sender y receiver deben procesar exactamente
-                    # el mismo checkpoint.
+                    # ------------------------------------------------
+                    # El receiver procesa exactamente el mismo
+                    # checkpoint transportado por el sender.
+                    # checkpoint_factor:
+                    #       0.0 -> no existe checkpoint
+                    #       1.0 -> checkpoint completo
+                    # ------------------------------------------------
                     checkpoint_amortization=
                         checkpoint_factor,
-                    # Provisional hasta verificar el objeto real
-                    # que se usa como checkpoint.
+
+                    # Provisional hasta cerrar el tamaño real del
+                    # material serializado usado como checkpoint.
                     checkpoint_input_bytes=256,
+
+                    # Solo se incluyen X25519/HKDF si realmente
+                    # ocurrió un evento de rekey.
                     rekey_triggered=
                         rekey_triggered,
+
+                    # Ascon DEC pertenece al baseline.
                     already_accounted_ops={
                         "ASCON_AEAD_DEC"
                     },
                 )
             )
 
+
+            # --------------------------------------------------------
+            # Tiempo adicional EA en el receptor.
+            # estimate_ea_incremental_processing() devuelve ms;
+            # aquí se convierte a segundos para calculate_timeout()
+            # y para la latencia total del evento.
+            # --------------------------------------------------------
             receiver_ea_proc_s = (
-                float(
-                    receiver_incremental[
-                        "incremental_processing_time_ms"
-                    ]
+                float(receiver_incremental["incremental_processing_time_ms"]
                 )
                 / 1000.0
             )
+
+            # ========================================================
+            # GUARDAR RESULTADOS LÓGICOS DEL PROCESAMIENTO EA
+            # ========================================================
+            # ESTE ES EL BLOQUE QUE DEBES AÑADIR AQUÍ.
+            # Debe estar FUERA de:
+            #       if dest != "Sink"
+            # porque tanto un CH como el Sink ejecutan conceptualmente
+            # la verificación EA.
+            # Para el Sink:
+            #       tiempo -> sí se contabiliza
+            #       operaciones -> sí se contabilizan
+            #       energía de batería UWSN -> no se contabiliza
+            #
+            # Esto permite incluir el tiempo de verificación del Sink
+            # sin cargar esa energía al presupuesto de los nodos
+            # sumergidos.
+            # ========================================================
+            ea_cost = tx_ea.setdefault(
+                "ea_cost",
+                {}
+            )
+
+            ea_cost.update({
+                # Tiempo computacional modelado en el receiver.
+                "ea_receiver_incremental_time_ms":
+                    float(receiver_incremental["incremental_processing_time_ms"]
+                    ),
+
+                # Operaciones realizadas:
+                #
+                #   POLICY_MAC_VERIFY
+                #   CHECKPOINT_HASH
+                #   ED25519_VERIFY
+                #   X25519/HKDF
+                #   ...
+                #
+                # según el perfil/evento.
+                "receiver_incremental_ops":
+                    receiver_incremental["incremental_operation_counts"],
+
+                # ----------------------------------------------------
+                # Energía TEÓRICA del procesamiento receiver.
+                # Este campo describe cuánto costaría la operación
+                # utilizando P_PROC de la plataforma calibrada.
+                # No significa necesariamente energía descontada de
+                # la batería de la red, porque el Sink se considera
+                # externamente alimentado.
+                # ----------------------------------------------------
+
+                "ea_receiver_incremental_modeled_energy_mj":
+                    float(receiver_incremental["incremental_processing_energy_mj"]),
+            })
+
 
         # --------------------------------------------------------
         # Tiempo total de procesamiento observado en RX
@@ -1387,12 +1506,10 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             )
             # ----------------------------------------------------
             # U-Tangle base:
-            #
             # Aquí se contabiliza:
             #   - RX acústico
             #   - tiempo/passive/listen según el modelo
             #   - ASCON decrypt mediante t_verif_s=t_dec_s
-            #
             # NO incluimos todavía procesamiento EA.
             # ----------------------------------------------------
             receiver_node = update_energy_node_tdma(
@@ -1422,48 +1539,68 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             # ----------------------------------------------------
             # Descontar procesamiento incremental EA
             # ----------------------------------------------------
+            # Este bloque está dentro de:
+            #       if dest != "Sink"
+            # por tanto aquí sí estamos trabajando con un nodo
+            # sumergido cuya ResidualEnergy forma parte del
+            # presupuesto energético de la UWSN.
+            # ----------------------------------------------------
             if receiver_incremental is not None:
-                receiver_inc_mj = float(
-                    receiver_incremental[
-                        "incremental_processing_energy_mj"
-                    ]
+                # Energía modelada por ea_crypto_costs.py [mJ]
+                receiver_inc_mj = float(receiver_incremental["incremental_processing_energy_mj"]
                 )
-                # Devuelve J realmente descontados
+
+                # --------------------------------------------------------
+                # Descontar físicamente esa energía de ResidualEnergy.
+                # La función devuelve J realmente descontados.
+                # --------------------------------------------------------
                 E_ea_receiver = (
                     apply_incremental_processing_energy(
                         receiver_node,
                         receiver_inc_mj,
                     )
                 )
-                # ------------------------------------------------
-                # Guardar descomposición EA
-                # ------------------------------------------------
 
+                # --------------------------------------------------------
+                # Registrar la energía REAL contabilizada en la batería
+                # del nodo.
+                # time y operations ya fueron guardados anteriormente.
+                # --------------------------------------------------------
                 if tx_ea is not None:
-                    ea_cost = tx_ea.setdefault(
+                    tx_ea.setdefault(
                         "ea_cost",
                         {}
+                    )[
+                        "ea_receiver_incremental_energy_mj"
+                    ] = (
+                        E_ea_receiver * 1000.0
                     )
-                    ea_cost.update({
-                        "ea_receiver_incremental_time_ms":
-                            receiver_incremental[
-                                "incremental_processing_time_ms"
-                            ],
-                        "ea_receiver_incremental_energy_mj":
-                            E_ea_receiver * 1000.0,
-                        "receiver_incremental_ops":
-                            receiver_incremental[
-                                "incremental_operation_counts"
-                            ],
-                    })
 
         # --------------------------------------------------------
-        # Sink:
-        # actualmente no se modela consumo RX del Sink
+        # Sink
+        # --------------------------------------------------------
+        # El Sink sí ejecutó:
+        #   - ASCON verification
+        #   - EA policy verification
+        # y por tanto esos tiempos/operaciones aparecen en el log.
+        # Sin embargo se asume que el Sink está externamente
+        # alimentado, por lo que su energía no se carga al
+        # presupuesto de batería de la UWSN.
         # --------------------------------------------------------
         else:
             E_rx = 0.0
             E_ea_receiver = 0.0
+
+            if (
+                tx_ea is not None
+                and receiver_incremental is not None
+            ):
+                tx_ea.setdefault(
+                    "ea_cost",
+                    {}
+                )[
+                    "ea_receiver_incremental_energy_mj"
+                ] = 0.0
 
         # --------------------------------------------------------
         # Energía total correspondiente al receptor
@@ -1721,6 +1858,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # --------------------------------------------------------
 
         tx_ea.setdefault("ea_state", {})
+        tx_ea["ea_state"]["channel_success"] = bool(channel_success)
+        tx_ea["ea_state"]["accepted"] = bool(success)
         tx_ea["ea_state"]["snr_db"] = snr_db
         tx_ea["ea_state"]["per_link"] = per_link
         tx_ea["ea_state"]["ber"] = ber
@@ -1816,8 +1955,9 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # Sender:
         #       ASCON encryption
         # Receiver:
-        #       ASCON decryption únicamente si el paquete fue
-        #       recibido correctamente.
+        #       ASCON decryption/verification cuando el frame fue
+        #       recibido físicamente, incluso si posteriormente
+        #       falla la autenticación.
         # Para el Sink también podemos conservar el tiempo de
         # descifrado dentro de la latencia aunque su energía no se
         # cargue a la batería de la UWSN.
@@ -1826,7 +1966,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             t_enc_s
             + (
                 t_proc_rx_s
-                if success
+                if rx_decrypt_attempted
                 else 0.0
             )
         ) * 1000.0
@@ -1845,11 +1985,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # --------------------------------------------------------
         ea_incremental_time_ms = (
             sender_ea_proc_s
-            + (
-                receiver_ea_proc_s
-                if success
-                else 0.0
-            )
+            + receiver_ea_proc_s
         ) * 1000.0
 
         # --------------------------------------------------------
@@ -1916,23 +2052,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
         ###
         sender_ops = (
-            tx_ea.get(
-                "ea_cost", {}
-            ).get(
-                "sender_incremental_ops",
-                {}
-            )
+            tx_ea.get("ea_cost", {}).get("sender_incremental_ops", {})
         )
 
         receiver_ops = (
-            tx_ea.get(
-                "ea_cost", {}
-            ).get(
-                "receiver_incremental_ops",
-                {}
-            )
-            if success
-            else {}
+            tx_ea.get("ea_cost", {}).get("receiver_incremental_ops", {})
         )
 
         all_ops = (
@@ -1965,12 +2089,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             tx=tx_ea,
 
             latency_ms=total_latency_ms,
-
-            pdr=(
-                1.0
-                if success
-                else 0.0
-            ),
+            # accepted delivery
+            pdr=(1.0 if success else 0.0 ),
             downgrade_injected=
                 ea_ctx["scenario"].downgrade_detected,
 
