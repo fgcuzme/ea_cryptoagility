@@ -182,7 +182,7 @@ def summarize_per_node_by_run(input_csv=CANON_CSV, output_dir=None, phase=None, 
         print(f"📁 Resumen por nodo exportado: {output_csv}")
 
 
-def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
+def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None, snapshot_csv=None,):
     if not os.path.exists(input_csv):
         print(f"🚨 Archivo no encontrado: {input_csv}")
         return
@@ -193,49 +193,29 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
     output_dir = output_dir or os.environ.get("OUTPUT_DIR", "stats/")
     # os.makedirs(input_csv, exist_ok=True)
 
-    E0 = float(os.environ.get("UWSN_ENERGY_INITIAL_J", "100.0"))
+    # E0 = float(os.environ.get("UWSN_ENERGY_INITIAL_J", "100.0"))
     
     for run_id, group in df.groupby("run_id"):
         d = group.copy()
 
         ##
         msg = d["msg_type"].astype(str)
-
         is_tx = (d["energy_event_type"] == "tx")
-
         is_rx = (d["energy_event_type"] == "rx")
-
         is_data = msg.str.startswith("DATA:")
-
         is_ack = msg.str.startswith("ACK:")
-
         is_retry = msg.str.contains(":RETRY",regex=False,)
-
         all_tx = d[is_tx]
-
         data_tx = d[is_tx & is_data]
-
         initial_data_tx = d[is_tx & is_data & ~is_retry]
-
         retry_tx = d[is_tx & is_data & is_retry]
-
         ack_tx = d[is_tx & is_ack]
-
         total_tx_events = len(all_tx)
-
         logical_data_packets = len(initial_data_tx)
-
         data_attempts = len(data_tx)
-
         retransmissions = len(retry_tx)
-
         ack_attempts = len(ack_tx)
-
-        ack_failures = int(
-            (
-                ~ack_tx["success"].astype(bool)
-            ).sum()
-        )
+        ack_failures = int((~ack_tx["success"].astype(bool)).sum())
         ##
 
         ###
@@ -246,9 +226,7 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
         )
 
         network_phase_energy_j = float(
-            phase_energy[
-                "energy_total_j"
-            ].sum()
+            phase_energy["energy_total_j"].sum()
         )
 
         active_event_energy_j = float(
@@ -292,14 +270,38 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
         rx_events = d[d.energy_event_type == "rx"]
         # successful = int(rx_events["success"].sum())
 
-        avg_latency = d["latency_ms"].mean()
+        # avg_latency = d["latency_ms"].mean()
+        ##
+        avg_tx_event_latency_ms = (
+            all_tx["latency_ms"].mean()
+            if len(all_tx)
+            else 0.0
+        )
+        ##
+
+        ##
+        total_link_tx_bits = float(
+            data_tx["bits_sent"].sum() + ack_tx["bits_sent"].sum()
+        )
+
+        initial_application_bits = float(
+            initial_data_tx["payload_bits"].sum()
+        )
+
+        link_payload_efficiency_percent = (
+            100.0 * initial_application_bits / total_link_tx_bits
+            if total_link_tx_bits > 0.0
+            else 0.0
+        )
+        ##
+
         total_energy = d["energy_j"].sum()
         avg_energy = d["energy_j"].mean()
 
         kbps_bruto = (d["bits_received"].sum()/1024.0) / (d["latency_ms"].sum()/1000.0) if d["latency_ms"].sum() > 0 else 0.0
         kbps_util = (d["payload_bits"].sum()/1024.0) / (d["latency_ms"].sum()/1000.0) if d["latency_ms"].sum() > 0 else 0.0
-        eff_pct = (d["payload_bits"].sum() / d["bits_received"].sum() * 100.0) if d["bits_received"].sum() > 0 else 0.0
-        loss_pct = 100.0 * (1.0 - (successful / total_tx)) if total_tx > 0 else 0.0
+        # eff_pct = (d["payload_bits"].sum() / d["bits_received"].sum() * 100.0) if d["bits_received"].sum() > 0 else 0.0
+        # loss_pct = 100.0 * (1.0 - (successful / total_tx)) if total_tx > 0 else 0.0
 
         output_csv = os.path.join(output_dir, f"{run_id}_{phase}_global.csv")
         with open(output_csv, "w", newline="") as f:
@@ -318,10 +320,38 @@ def summarize_global_by_run(input_csv=CANON_CSV, output_dir=None, phase=None):
         print(f"📊 Resumen global exportado: {output_csv}")
 
 
-print(f"📁 Guardando en: {os.environ.get('OUTPUT_DIR')}")
+# print(f"📁 Guardando en: {os.environ.get('OUTPUT_DIR')}")
 
-output_dir = os.environ.get("OUTPUT_DIR", "stats/")
-for phase in PHASES:
-    print(f"\n📡 Procesando fase: {phase}")
-    summarize_per_node_by_run(phase=phase)
-    summarize_global_by_run(phase=phase)
+# output_dir = os.environ.get("OUTPUT_DIR", "stats/")
+# for phase in PHASES:
+#     print(f"\n📡 Procesando fase: {phase}")
+#     summarize_per_node_by_run(phase=phase)
+#     summarize_global_by_run(phase=phase)
+
+def summarize_all_by_run(
+    input_csv=CANON_CSV,
+    output_dir=None,
+    snapshot_csv=None,
+    sim_duration_s=None,
+):
+
+    for phase in PHASES:
+
+        print(
+            f"\n📡 Procesando fase: {phase}"
+        )
+
+        summarize_per_node_by_run(
+            input_csv=input_csv,
+            output_dir=output_dir,
+            phase=phase,
+            snapshot_csv=snapshot_csv,
+        )
+
+        summarize_global_by_run(
+            input_csv=input_csv,
+            output_dir=output_dir,
+            phase=phase,
+            snapshot_csv=snapshot_csv,
+            sim_duration_s=sim_duration_s,
+        )

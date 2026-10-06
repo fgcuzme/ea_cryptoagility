@@ -872,7 +872,18 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     ### for
 
     # sumarización de run
-    from transmission_summary_uan import summarize_global_by_run, summarize_per_node_by_run
+    from transmission_summary_uan import (summarize_all_by_run)
+
+    summarize_all_by_run(
+        input_csv=os.environ[
+            "UWSN_EVENTS_CSV"
+        ],
+        output_dir=output_dir,
+        snapshot_csv=
+            ENERGY_SNAPSHOT_CSV,
+        sim_duration_s=
+            SIM_DURATION_S,
+    )
 
     # ###################
     print("-")
