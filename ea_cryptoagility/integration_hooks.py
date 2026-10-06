@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+from collections import deque
 from typing import Any, Dict, Optional
 
 # from .ea_crypto_costs import estimate_total_transaction_cost, operation_counts_for_policy
@@ -16,6 +17,208 @@ from .ea_types import (CrossLayerState, MessageType, PolicyTuple, Thresholds,
 
 DEFAULT_POLICY_KEY = b"EA-CryptoAgility-U-Tangle-policy-key-v1"
 
+### Helper
+# ============================================================
+# Cross-layer observation tracking
+# ============================================================
+DEFAULT_OBSERVATION_WINDOW = int(
+    os.environ.get(
+        "EA_OBSERVATION_WINDOW",
+        "20",
+    )
+)
+
+def _clip01(value: float) -> float:
+    return max(
+        0.0,
+        min(1.0, float(value)),
+    )
+
+def _get_observation_store(
+    ea_ctx: Dict[str, Any],
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Estado de observación LOCAL al run.
+    No se utilizan globals para evitar contaminación entre
+    ejecuciones independientes.
+    """
+    return ea_ctx.setdefault(
+        "_observation_state",
+        {},
+    )
+
+def _get_node_observation(
+    ea_ctx: Dict[str, Any],
+    node_id: int,
+) -> Dict[str, Any]:
+    store = _get_observation_store(ea_ctx)
+    node_id = int(node_id)
+    if node_id not in store:
+        window = max(
+            1,
+            int(
+                ea_ctx.get(
+                    "observation_window",
+                    DEFAULT_OBSERVATION_WINDOW,
+                )
+            ),
+        )
+
+        store[node_id] = {
+            # Resultado de cada intento DATA:
+            # 0 = recibido
+            # 1 = perdido
+            "data_losses":
+                deque(maxlen=window),
+
+            # Una entrada por paquete lógico:
+            # 0 = no necesitó retry
+            # 1 = necesitó >= 1 retry
+            "logical_retries":
+                deque(maxlen=window),
+
+            # Resultado de verificaciones:
+            # 0 = válida
+            # 1 = inválida
+            "invalid_verifications":
+                deque(maxlen=window),
+
+            # Evidencias de seguridad recientes
+            "downgrade_detected": False,
+            "replay_detected": False,
+            "suspicious_identity": False,
+
+            # Número total de observaciones.
+            "data_attempts_total": 0,
+            "logical_packets_total": 0,
+            "verification_events_total": 0,
+        }
+    return store[node_id]
+###
+
+### funcion de observacion update
+def update_cross_layer_observation(
+    ea_ctx: Dict[str, Any],
+    node_id: int,
+    *,
+    data_success: Optional[bool] = None,
+    logical_packet_had_retry: Optional[bool] = None,
+    verification_valid: Optional[bool] = None,
+    downgrade_detected: bool = False,
+    replay_detected: bool = False,
+    suspicious_identity: bool = False,
+) -> Dict[str, Any]:
+    """
+    Actualiza únicamente observaciones que YA ocurrieron.
+    Esta función no selecciona políticas y no utiliza valores
+    sintéticos de SC1-SC5.
+    """
+    obs = _get_node_observation(
+        ea_ctx,
+        node_id,
+    )
+
+    if data_success is not None:
+        obs["data_losses"].append(
+            0.0 if bool(data_success) else 1.0
+        )
+        obs["data_attempts_total"] += 1
+
+    if logical_packet_had_retry is not None:
+        obs["logical_retries"].append(
+            1.0
+            if bool(logical_packet_had_retry)
+            else 0.0
+        )
+        obs["logical_packets_total"] += 1
+
+    if verification_valid is not None:
+        obs["invalid_verifications"].append(
+            0.0
+            if bool(verification_valid)
+            else 1.0
+        )
+        obs["verification_events_total"] += 1
+
+    if downgrade_detected:
+        obs["downgrade_detected"] = True
+
+    if replay_detected:
+        obs["replay_detected"] = True
+
+    if suspicious_identity:
+        obs["suspicious_identity"] = True
+
+    return obs
+###
+
+### función de observación get
+def get_cross_layer_observation(
+    ea_ctx: Dict[str, Any],
+    node_id: int,
+    *,
+    fallback_per: float = 0.0,
+    fallback_dag_load: float = 0.0,
+) -> Dict[str, Any]:
+    """
+    Devuelve Ω_i(t) observado ANTES de seleccionar la política
+    de la siguiente transacción.
+    Si todavía no existe historial DATA, se utiliza únicamente
+    el PER físico instantáneo como condición inicial.
+    """
+    obs = _get_node_observation(
+        ea_ctx,
+        node_id,
+    )
+
+    losses = obs["data_losses"]
+
+    if len(losses) > 0:
+        per_i = sum(losses) / len(losses)
+        per_source = "OBSERVED_WINDOW"
+    else:
+        per_i = _clip01(fallback_per)
+        per_source = "PHY_INITIALIZATION"
+
+    retries = obs["logical_retries"]
+
+    if len(retries) > 0:
+        ret_i = sum(retries) / len(retries)
+    else:
+        ret_i = 0.0
+
+    invalid = obs["invalid_verifications"]
+
+    if len(invalid) > 0:
+        inv_i = sum(invalid) / len(invalid)
+    else:
+        inv_i = 0.0
+
+    return {
+        "per": _clip01(per_i),
+        "per_source": per_source,
+        "retransmission_rate": _clip01(ret_i),
+        "invalid_signature_rate": _clip01(inv_i),
+        "dag_load": _clip01(fallback_dag_load),
+        "downgrade_detected":
+            bool(obs["downgrade_detected"]),
+        "replay_detected":
+            bool(obs["replay_detected"]),
+        "suspicious_identity":
+            bool(obs["suspicious_identity"]),
+        "observation_window":
+            int(
+                ea_ctx.get(
+                    "observation_window",
+                    DEFAULT_OBSERVATION_WINDOW,
+                )
+            ),
+
+        "data_window_samples": len(losses),
+        "retry_window_samples": len(retries),
+        "verification_window_samples": len(invalid),
+    }
+###
 
 def infer_message_type(tx: Dict[str, Any]) -> MessageType:
     """
@@ -213,10 +416,35 @@ def build_state_from_uwsnsecure(
     downgrade_detected: bool = False,
     replay_detected: bool = False,
     suspicious_identity: bool = False,
+    ea_ctx: Optional[Dict[str, Any]] = None,
+    neighbor_id: Optional[int] = None,
 ) -> CrossLayerState:
     tx = tx or {}
     residual, initial = node_energy(node)
     node_id = int(node.get("NodeID", node.get("node_id", -1)))
+
+    ###
+    observed = None
+
+    if ea_ctx is not None:
+        observed = get_cross_layer_observation(
+            ea_ctx,
+            node_id,
+            fallback_per=per,
+            fallback_dag_load=dag_load,
+        )
+        
+        per = observed["per"]
+        retransmission_rate = (observed["retransmission_rate"])
+        invalid_signature_rate = (observed["invalid_signature_rate"])
+        ## agregado
+        dag_load = observed["dag_load"]
+        ##
+        downgrade_detected = (observed["downgrade_detected"])
+        replay_detected = (observed["replay_detected"])
+        suspicious_identity = (observed["suspicious_identity"])
+    ###
+
     return CrossLayerState(
         node_id=node_id,
         time_s=time.time() if run_time_s is None else float(run_time_s),
@@ -226,12 +454,14 @@ def build_state_from_uwsnsecure(
         per=float(per),
         retransmission_rate=float(retransmission_rate),
         dag_load=float(dag_load),
-        security_risk=float(security_risk),
+        # security_risk=float(security_risk),
+        security_risk=0.0,
         invalid_signature_rate=float(invalid_signature_rate),
         downgrade_detected=bool(downgrade_detected),
         replay_detected=bool(replay_detected),
         suspicious_identity=bool(suspicious_identity),
         role=str(node.get("Role", "SN")),
+        neighbor_id=neighbor_id,
     )
 
 
@@ -249,6 +479,9 @@ def attach_policy_to_transaction(
     downgrade_detected: bool = False,
     replay_detected: bool = False,
     suspicious_identity: bool = False,
+    # agregado
+    ea_ctx: Optional[Dict[str, Any]] = None,
+    neighbor_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Select π_i(t), build policy_meta_i(t), and attach them to an existing transaction dict.
@@ -266,6 +499,9 @@ def attach_policy_to_transaction(
         downgrade_detected=downgrade_detected,
         replay_detected=replay_detected,
         suspicious_identity=suspicious_identity,
+        # agregado
+        ea_ctx=ea_ctx,
+        neighbor_id=neighbor_id,
     )
     policy = select_policy(state, thresholds)
     meta = build_policy_metadata(policy, state, epoch=epoch, key=key)
