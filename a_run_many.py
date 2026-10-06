@@ -130,6 +130,8 @@ def run_batch(
                     env["UAN_MAX_DATA_RETRIES"] = (os.environ.get(
                             "UAN_MAX_DATA_RETRIES", "1")
                     )
+
+                    env["SIM_DURATION_S"] = (os.environ.get("SIM_DURATION_S","600",))
                     
                     # ------------------------------------------------------------
                     # Security experiment: IRR via policy_meta tampering

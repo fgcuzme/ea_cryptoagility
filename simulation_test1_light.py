@@ -871,7 +871,10 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
 
     ### for
 
-    # sumarización de run
+    # ============================================================
+    # Generación de estadísticas del run
+    # ============================================================
+
     from transmission_summary_uan import (summarize_all_by_run)
 
     summarize_all_by_run(
