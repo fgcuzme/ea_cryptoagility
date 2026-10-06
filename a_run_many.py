@@ -98,6 +98,7 @@ def run_batch(
                     # env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
                     # env["PER_VARIABLE"] = PER_BY_SCENARIO.get(ea_scenario_id, "None")
                     env["PER_VARIABLE"] = (os.environ.get("PER_VARIABLE","None"))
+                    env["UAN_ALLOW_PER_OVERRIDE"] = (os.environ.get("UAN_ALLOW_PER_OVERRIDE","0"))
                     
                     # Diametro de la red
                     env["DIM_X"] = str(dim_x)
@@ -132,7 +133,7 @@ def run_batch(
                     )
 
                     env["SIM_DURATION_S"] = (os.environ.get("SIM_DURATION_S","600",))
-                    
+
                     # ------------------------------------------------------------
                     # Security experiment: IRR via policy_meta tampering
                     # ------------------------------------------------------------

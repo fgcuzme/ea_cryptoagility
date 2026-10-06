@@ -318,6 +318,21 @@ def summarize_per_node_by_run(
         .str.lower()
     )
 
+    # ============================================================
+    # Canonical phase naming
+    # ============================================================
+    # Los módulos históricos de sincronización registran
+    # phase="sync", mientras que energy_phase_snapshots.csv
+    # utiliza phase="syn".
+    # Internamente usamos "syn" como nombre canónico.
+    # ============================================================
+    df["phase"] = (
+        df["phase"]
+        .replace({
+            "sync": "syn",
+        })
+    )
+
     df = df[
         df["phase"]
         == str(phase).lower()
@@ -772,6 +787,21 @@ def summarize_global_by_run(
         .astype(str)
         .str.strip()
         .str.lower()
+    )
+
+    # ============================================================
+    # Canonical phase naming
+    # ============================================================
+    # Los módulos históricos de sincronización registran
+    # phase="sync", mientras que energy_phase_snapshots.csv
+    # utiliza phase="syn".
+    # Internamente usamos "syn" como nombre canónico.
+    # ============================================================
+    df["phase"] = (
+        df["phase"]
+        .replace({
+            "sync": "syn",
+        })
     )
 
     df = df[

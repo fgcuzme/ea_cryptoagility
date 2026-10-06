@@ -22,7 +22,6 @@ _MEAN = {
     "ecdh_x25519_s":     0.00052116,   # X25519 ECDH shared
     # Si mediste HKDF en esta misma campaña, reemplaza:
     "hkdf_s":            0.00022278,    # <- de tu tabla anterior (ajusta si tienes el nuevo)
-
     # Cambiar
     "encrypt_s":         0.00031245,    # tiempo medio de cifrado en segundos
     "descrypt_s":        0.00029812     # tiempo medio de descifrado en segundos

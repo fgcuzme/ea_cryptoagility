@@ -33,6 +33,13 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         PER_OVERRIDE = None
     else:
         PER_OVERRIDE = float(PER)
+
+    ALLOW_PER_OVERRIDE = (os.environ.get(
+            "UAN_ALLOW_PER_OVERRIDE","0")
+        .strip()
+        .lower()
+        in {"1", "true", "yes"}
+    )
     ###
 
     EA_ENABLED = int(os.environ.get("EA_ENABLED", "0"))
@@ -101,6 +108,11 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         "logger": EA_LOGGER,
         "run_id": RUN_ID,
         "seed": SEED,
+        # Solo para experimentos controlados de validación PHY/ARQ.
+        "allow_per_override": bool(
+            ALLOW_PER_OVERRIDE
+            and PER_OVERRIDE is not None
+        ),
         }
 
     # %% PARAMETROS INICIALES DE SIMULACIÓN
@@ -709,9 +721,9 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # 📌 Generar claves compartidas después de la autenticación
     generate_shared_keys("bbdd_keys_shared_sign_cipher.db", node_uw, CH, node_sink)
 
-    # Parámetros realistas
-    MAX_BUFFER = 5               # número máximo de datos antes de enviar al Sink
-    AGGREGATION_TIMEOUT = 120     # segundos máximo antes de forzar envío
+    # # Parámetros realistas
+    # MAX_BUFFER = 5               # número máximo de datos antes de enviar al Sink
+    # AGGREGATION_TIMEOUT = 120     # segundos máximo antes de forzar envío
 
     #%%
     ## Otra forma de ejecutar la simulaión 
