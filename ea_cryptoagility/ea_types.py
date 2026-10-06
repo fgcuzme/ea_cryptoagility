@@ -47,26 +47,91 @@ class PayloadMode(str, Enum):
     MINIMAL_AUTHENTICATED = "MINIMAL_AUTHENTICATED"
 
 
+# @dataclass(frozen=True)
+# class Thresholds:
+#     """Thresholds used by Algorithm 1."""
+#     PER_HIGH: float = 0.20
+#     RET_HIGH: float = 2.0
+#     EP_HIGH: float = 0.75
+#     EP_CRITICAL: float = 0.90
+#     SR_LOW: float = 0.25
+#     SR_HIGH: float = 0.70
+#     INV_HIGH: float = 0.10
+#     D_HIGH: float = 0.75
+
 @dataclass(frozen=True)
 class Thresholds:
-    """Thresholds used by Algorithm 1."""
+    """
+    Thresholds used by the EA-CryptoAgility policy engine.
+    All cross-layer rates are normalized in [0,1].
+    Hysteresis:
+        HIGH -> threshold to enter a condition.
+        LOW/EXIT -> lower threshold required to leave it.
+    """
+
+    # --------------------------------------------------------
+    # Acoustic channel
+    # --------------------------------------------------------
     PER_HIGH: float = 0.20
-    RET_HIGH: float = 2.0
+    PER_LOW: float = 0.10
+
+    # Ret_i(t) =
+    # logical packets requiring >=1 retry /
+    # logical packets observed
+    RET_HIGH: float = 0.50
+    RET_LOW: float = 0.25
+
+    # --------------------------------------------------------
+    # Energy pressure
+    #
+    # EP_i(t) = 1 - E_i(t)/E_i,0
+    # --------------------------------------------------------
     EP_HIGH: float = 0.75
+    EP_HIGH_EXIT: float = 0.70
     EP_CRITICAL: float = 0.90
+
+    # --------------------------------------------------------
+    # Security risk
+    # --------------------------------------------------------
     SR_LOW: float = 0.25
     SR_HIGH: float = 0.70
+
+    # Hysteresis threshold for leaving S3.
+    SR_EXIT: float = 0.40
+
+    # --------------------------------------------------------
+    # Invalid verification rate
+    # --------------------------------------------------------
     INV_HIGH: float = 0.10
+    INV_LOW: float = 0.05
+
+    # --------------------------------------------------------
+    # DAG
+    # --------------------------------------------------------
     D_HIGH: float = 0.75
 
+    # --------------------------------------------------------
+    # S3 cooldown
+    # Number of consecutive clean decisions required
+    # before leaving S3.
+    # --------------------------------------------------------
+    S3_COOLDOWN_DECISIONS: int = 3
+
+    # --------------------------------------------------------
+    # SR_i(t) weights
+    # --------------------------------------------------------
+    W_PER: float = 0.20
+    W_RET: float = 0.15
+    W_INV: float = 0.25
+    W_CRIT: float = 0.20
+    W_DOW: float = 0.20
 
 @dataclass
 class CrossLayerState:
     """
     Compact cross-layer observation vector Ω_i(t).
-
-    All rates are expected to be normalized in [0,1], except retransmission_rate,
-    which may be an absolute average number of retries per transaction.
+    PER, retransmission_rate, dag_load, security_risk and
+    invalid_signature_rate are normalized in [0,1].
     """
     node_id: int
     time_s: float = 0.0
@@ -93,6 +158,17 @@ class CrossLayerState:
     role: str = "SN"
     neighbor_id: Optional[int] = None
     attack_label: str = "NONE"
+
+    ###
+    # --------------------------------------------------------
+    # Policy hysteresis/cooldown state
+    # --------------------------------------------------------
+    # Profile selected for the previous transaction.
+    previous_profile: str = "S1"
+    # Consecutive clean policy decisions accumulated while
+    # recovering from S3.
+    s3_clean_streak: int = 0
+    ###
 
     def as_dict(self) -> Dict[str, Any]:
         d = asdict(self)

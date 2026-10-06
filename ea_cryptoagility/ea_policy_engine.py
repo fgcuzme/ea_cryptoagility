@@ -26,20 +26,40 @@ def compute_energy_pressure(residual_energy_j: float, initial_energy_j: float) -
     return max(0.0, min(1.0, ep))
 
 
+## new
 def compute_security_risk(
     per: float,
-    retransmission_rate_norm: float,
+    retransmission_rate: float,
     invalid_signature_rate: float,
     criticality: float,
     downgrade_indicator: float,
     weights: Optional[dict] = None,
 ) -> float:
     """
-    SR_i(t) = α1 PER_i(t) + α2 Ret_i(t) + α3 Inv_i(t)
-              + α4 Crit_i(t) + α5 Dow_i(t)
+    Compute normalized security risk:
+        SR_i(t) = α1 PER_i(t) + α2 Ret_i(t) + α3 Inv_i(t) + α4 Crit_i(t) + α5 Dow_i(t)
 
-    All inputs should be normalized in [0,1].
+    All input indicators must be normalized in [0,1].
     """
+
+    def clip01(x: float) -> float:
+        return max(
+            0.0,
+            min(1.0, float(x)),
+        )
+
+    per = clip01(per)
+    retransmission_rate = clip01(
+        retransmission_rate
+    )
+    invalid_signature_rate = clip01(
+        invalid_signature_rate
+    )
+    criticality = clip01(criticality)
+    downgrade_indicator = clip01(
+        downgrade_indicator
+    )
+
     w = weights or {
         "per": 0.20,
         "ret": 0.15,
@@ -47,16 +67,29 @@ def compute_security_risk(
         "criticality": 0.20,
         "downgrade": 0.20,
     }
-    total = sum(w.values()) or 1.0
-    risk = (
-        w["per"] * per
-        + w["ret"] * retransmission_rate_norm
-        + w["invalid"] * invalid_signature_rate
-        + w["criticality"] * criticality
-        + w["downgrade"] * downgrade_indicator
-    ) / total
-    return max(0.0, min(1.0, risk))
 
+    total = float(sum(w.values()))
+
+    if total <= 0.0:
+        raise ValueError(
+            "Security-risk weights must sum "
+            "to a positive value."
+        )
+
+    risk = (
+        float(w["per"]) * per
+        + float(w["ret"])
+        * retransmission_rate
+        + float(w["invalid"])
+        * invalid_signature_rate
+        + float(w["criticality"])
+        * criticality
+        + float(w["downgrade"])
+        * downgrade_indicator
+    ) / total
+
+    return clip01(risk)
+##
 
 def _criticality_from_message(message_type: MessageType) -> float:
     if message_type in {MessageType.JOIN, MessageType.KEY_UPDATE, MessageType.CH_ELECTION}:
@@ -68,47 +101,218 @@ def _criticality_from_message(message_type: MessageType) -> float:
     return 0.1
 
 
+## función nueva para calcuar SR_i(t) desde el estado
+def compute_state_security_risk(
+    state: CrossLayerState,
+    thresholds: Thresholds = Thresholds(),
+) -> float:
+    """
+    Derive SR_i(t) exclusively from current cross-layer
+    observations.
+    scenario.security_risk must not participate here.
+    """
+    criticality = _criticality_from_message(
+        state.message_type
+    )
+
+    downgrade_indicator = (
+        1.0
+        if state.downgrade_detected
+        else 0.0
+    )
+
+    weights = {
+        "per": thresholds.W_PER,
+        "ret": thresholds.W_RET,
+        "invalid": thresholds.W_INV,
+        "criticality": thresholds.W_CRIT,
+        "downgrade": thresholds.W_DOW,
+    }
+
+    return compute_security_risk(
+        per=state.per,
+        retransmission_rate=
+            state.retransmission_rate,
+        invalid_signature_rate=
+            state.invalid_signature_rate,
+        criticality=criticality,
+        downgrade_indicator=
+            downgrade_indicator,
+        weights=weights,
+    )
+######
+
+## función de condición para salir de S3
+def is_s3_exit_clean(
+    state: CrossLayerState,
+    thresholds: Thresholds = Thresholds(),
+    security_risk: Optional[float] = None,
+) -> bool:
+    """
+    True only if the current observation is sufficiently clean
+    to contribute one decision toward S3 cooldown exit.
+    """
+    sr = (
+        compute_state_security_risk(
+            state,
+            thresholds,
+        )
+        if security_risk is None
+        else float(security_risk)
+    )
+
+    explicit_attack = (
+        state.downgrade_detected
+        or state.replay_detected
+        or state.suspicious_identity
+    )
+
+    return (
+        not explicit_attack
+        and
+        state.invalid_signature_rate <= thresholds.INV_LOW
+        and
+        sr <= thresholds.SR_EXIT
+    )
+##
+
+## function new 
 def select_policy(
     state: CrossLayerState,
     thresholds: Thresholds = Thresholds(),
 ) -> PolicyTuple:
     """
-    Algorithm 1: Energy-Aware Cryptographic Policy Selection.
-
+    Energy-Aware Cryptographic Policy Selection.
+    The function derives SR_i(t) from actual cross-layer
+    observations and applies hysteresis/cooldown rules.
     Output:
-        π_i(t) = <S*, checkpoint_rule, rekey_rule, payload_mode>
+        π_i(t) =
+        <S*, checkpoint_rule, rekey_rule, payload_mode>
     """
-    EP_i = compute_energy_pressure(state.residual_energy_j, state.initial_energy_j)
 
-    # If the caller did not precompute SR_i(t), derive a conservative estimate.
-    SR_i = state.security_risk
-    if SR_i <= 0.0:
-        ret_norm = min(1.0, state.retransmission_rate / max(1.0, thresholds.RET_HIGH))
-        crit = _criticality_from_message(state.message_type)
-        dow = 1.0 if state.downgrade_detected else 0.0
-        SR_i = compute_security_risk(
-            per=state.per,
-            retransmission_rate_norm=ret_norm,
-            invalid_signature_rate=state.invalid_signature_rate,
-            criticality=crit,
-            downgrade_indicator=dow,
-        )
+    # ========================================================
+    # 1. Energy pressure
+    # ========================================================
+    EP_i = compute_energy_pressure(
+        state.residual_energy_j,
+        state.initial_energy_j,
+    )
 
-    channel_degraded = (state.per >= thresholds.PER_HIGH) or (
+    # ========================================================
+    # 2. Security risk
+    #
+    # Always derived from observations.
+    # Never use scenario.security_risk as policy input.
+    # ========================================================
+    SR_i = compute_state_security_risk(
+        state,
+        thresholds,
+    )
+
+    # IMPORTANT:
+    # Keep the state and the policy metadata consistent.
+    state.security_risk = SR_i
+    # ========================================================
+    # 3. Previous policy
+    # ========================================================
+    previous_profile = str(
+        getattr(state,"previous_profile",ProfileID.S1.value,)
+    )
+
+    if previous_profile.startswith("ProfileID."):
+        previous_profile = (previous_profile.split(".")[-1])
+
+    # ========================================================
+    # 4. Channel degradation with hysteresis
+    # ========================================================
+    channel_degraded_enter = (
+        state.per >= thresholds.PER_HIGH
+        or
         state.retransmission_rate >= thresholds.RET_HIGH
     )
 
-    high_risk = (
+    channel_degraded_hold = (
+        previous_profile == ProfileID.S2.value
+        and (
+            state.per >= thresholds.PER_LOW
+            or
+            state.retransmission_rate >= thresholds.RET_LOW
+        )
+    )
+
+    channel_degraded = (
+        channel_degraded_enter
+        or channel_degraded_hold
+    )
+
+    # ========================================================
+    # 5. Energy-pressure hysteresis
+    # ========================================================
+    energy_pressure_high = (
+        EP_i >= thresholds.EP_HIGH
+    )
+
+    if (
+        previous_profile == ProfileID.S2.value
+        and
+        EP_i >= thresholds.EP_HIGH_EXIT
+    ):
+        energy_pressure_high = True
+
+    # ========================================================
+    # 6. Current high-risk evidence
+    # ========================================================
+    high_risk_now = (
         state.downgrade_detected
         or state.replay_detected
         or state.suspicious_identity
-        or state.invalid_signature_rate >= thresholds.INV_HIGH
-        or SR_i >= thresholds.SR_HIGH
+        or
+        state.invalid_signature_rate >= thresholds.INV_HIGH
+        or
+        SR_i >= thresholds.SR_HIGH
     )
 
-    # S4: emergency with degraded acoustic channel or critical energy pressure.
-    if state.message_type == MessageType.EMERGENCY_ALARM and (
-        channel_degraded or EP_i >= thresholds.EP_CRITICAL
+    # ========================================================
+    # 7. S3 hysteresis / cooldown
+    # ========================================================
+    clean_for_s3_exit = is_s3_exit_clean(
+        state,
+        thresholds,
+        security_risk=SR_i,
+    )
+
+    s3_clean_streak = max(
+        0,
+        int(
+            getattr(
+                state,
+                "s3_clean_streak",
+                0,
+            )
+        ),
+    )
+
+    s3_cooldown_active = (
+        previous_profile == ProfileID.S3.value
+        and (
+            not clean_for_s3_exit
+            or
+            s3_clean_streak < thresholds.S3_COOLDOWN_DECISIONS
+        )
+    )
+
+    # ========================================================
+    # S4
+    # Emergency with degraded channel or critical battery.
+    # ========================================================
+    if (
+        state.message_type
+        == MessageType.EMERGENCY_ALARM
+        and (
+            channel_degraded
+            or
+            EP_i >= thresholds.EP_CRITICAL
+        )
     ):
         return PolicyTuple(
             ProfileID.S4,
@@ -117,8 +321,14 @@ def select_policy(
             PayloadMode.MINIMAL_AUTHENTICATED,
         )
 
-    # S3: adversarial or suspicious context.
-    if high_risk:
+    # ========================================================
+    # S3
+    # Active adversarial evidence OR cooldown from previous S3.
+    # ========================================================
+    if (
+        high_risk_now
+        or s3_cooldown_active
+    ):
         return PolicyTuple(
             ProfileID.S3,
             CheckpointRule.STRICT,
@@ -126,7 +336,10 @@ def select_policy(
             PayloadMode.FULL_AUTHENTICATED,
         )
 
-    # S0: critical control under non-adversarial conditions.
+    # ========================================================
+    # S0
+    # Critical security/control traffic.
+    # ========================================================
     if state.message_type in {
         MessageType.JOIN,
         MessageType.KEY_UPDATE,
@@ -139,8 +352,10 @@ def select_policy(
             PayloadMode.FULL_AUTHENTICATED,
         )
 
-    # S0: emergency under normal channel/energy conditions.
-    if state.message_type == MessageType.EMERGENCY_ALARM:
+    # Emergency under normal conditions.
+    if (
+        state.message_type == MessageType.EMERGENCY_ALARM
+    ):
         return PolicyTuple(
             ProfileID.S0,
             CheckpointRule.IMMEDIATE,
@@ -148,11 +363,18 @@ def select_policy(
             PayloadMode.FULL_AUTHENTICATED,
         )
 
-    # S2: low-risk telemetry under energy pressure or benign channel degradation.
+    # ========================================================
+    # S2
+    # Low-risk telemetry under energy/channel pressure.
+    # ========================================================
     if (
         state.message_type == MessageType.TELEMETRY
-        and SR_i <= thresholds.SR_LOW
-        and (EP_i >= thresholds.EP_HIGH or channel_degraded)
+        and
+        SR_i <= thresholds.SR_LOW
+        and (
+            energy_pressure_high
+            or channel_degraded
+        )
     ):
         return PolicyTuple(
             ProfileID.S2,
@@ -161,8 +383,12 @@ def select_policy(
             PayloadMode.COMPACT_AEAD,
         )
 
-    # S1 with batching: normal telemetry but high DAG load.
-    if state.dag_load >= thresholds.D_HIGH:
+    # ========================================================
+    # S1 with checkpoint batching under DAG congestion.
+    # ========================================================
+    if (
+        state.dag_load >= thresholds.D_HIGH
+    ):
         return PolicyTuple(
             ProfileID.S1,
             CheckpointRule.BATCHED,
@@ -170,14 +396,16 @@ def select_policy(
             PayloadMode.NORMAL_AEAD,
         )
 
-    # S1 default.
+    # ========================================================
+    # S1 default
+    # ========================================================
     return PolicyTuple(
         ProfileID.S1,
         CheckpointRule.PERIODIC,
         RekeyRule.KEEP_CURRENT,
         PayloadMode.NORMAL_AEAD,
     )
-
+###
 
 def select_policy_from_values(
     message_type: str,

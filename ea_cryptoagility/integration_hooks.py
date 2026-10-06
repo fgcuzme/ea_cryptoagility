@@ -104,9 +104,9 @@ def update_cross_layer_observation(
     data_success: Optional[bool] = None,
     logical_packet_had_retry: Optional[bool] = None,
     verification_valid: Optional[bool] = None,
-    downgrade_detected: bool = False,
-    replay_detected: bool = False,
-    suspicious_identity: bool = False,
+    downgrade_detected: bool = None,
+    replay_detected: bool = None,
+    suspicious_identity: bool = None,
 ) -> Dict[str, Any]:
     """
     Actualiza únicamente observaciones que YA ocurrieron.
@@ -140,14 +140,15 @@ def update_cross_layer_observation(
         )
         obs["verification_events_total"] += 1
 
-    if downgrade_detected:
-        obs["downgrade_detected"] = True
+    # agregado
+    if downgrade_detected is not None:
+        obs["downgrade_detected"] = bool(downgrade_detected)
 
-    if replay_detected:
-        obs["replay_detected"] = True
+    if replay_detected is not None:
+        obs["replay_detected"] = bool(replay_detected)
 
-    if suspicious_identity:
-        obs["suspicious_identity"] = True
+    if suspicious_identity is not None:
+        obs["suspicious_identity"] = bool(suspicious_identity)
 
     return obs
 ###
@@ -588,8 +589,12 @@ def verify_transaction_policy(
         downgrade_detected=bool(state_dict.get("downgrade_detected", False)),
         replay_detected=bool(state_dict.get("replay_detected", False)),
         suspicious_identity=bool(state_dict.get("suspicious_identity", False)),
+        role=str(state_dict.get("role",node.get("Role", "SN"))),
+        neighbor_id=state_dict.get("neighbor_id"),
+        attack_label=str(state_dict.get("attack_label","NONE")),
     )
     expected_policy = select_policy(state, thresholds)
+
     return verify_policy_metadata(meta, expected_policy, state, epoch=epoch, key=key)
 
 
