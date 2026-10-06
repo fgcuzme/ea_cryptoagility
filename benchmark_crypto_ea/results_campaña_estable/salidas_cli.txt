@@ -1,0 +1,305 @@
+===== RUN 1 BEFORE =====
+dom 04 oct 2026 14:03:25 -05
+temp=60.1'C
+throttled=0x80000
+600000
+EA-CryptoAgility Raspberry Pi benchmark
+Samples       : 10000
+Batch         : 100 operations/sample
+P_PROC        : 0.100000 W
+Policy bytes  : 273
+
+POLICY_MAC_CRYPTO           
+  mean       : 25.414167 us
+  median     : 25.355210 us
+  p95        : 26.160940 us
+  stddev     : 0.773664 us
+  energy med.: 0.002535521 mJ
+
+POLICY_MAC_FULL             
+  mean       : 27.138068 us
+  median     : 27.096880 us
+  p95        : 27.528130 us
+  stddev     : 0.300863 us
+  energy med.: 0.002709688 mJ
+
+POLICY_MAC_VERIFY           
+  mean       : 27.119495 us
+  median     : 27.104165 us
+  p95        : 27.230730 us
+  stddev     : 0.706048 us
+  energy med.: 0.002710417 mJ
+
+CHECKPOINT_HASH_128         
+  mean       : 7.804192 us
+  median     : 7.781250 us
+  p95        : 7.908850 us
+  stddev     : 0.153833 us
+  energy med.: 0.000778125 mJ
+
+CHECKPOINT_HASH_256         
+  mean       : 9.441614 us
+  median     : 9.392190 us
+  p95        : 9.583850 us
+  stddev     : 0.155699 us
+  energy med.: 0.000939219 mJ
+
+CHECKPOINT_HASH_512         
+  mean       : 12.719497 us
+  median     : 12.643230 us
+  p95        : 13.054690 us
+  stddev     : 0.231482 us
+  energy med.: 0.001264323 mJ
+
+Results written to:
+  ea_bench_samples.csv
+  ea_bench_summary.csv
+Benchmark sink: 124
+===== RUN 1 AFTER =====
+temp=65.5'C
+throttled=0x80008
+1400000
+===== RUN 2 BEFORE =====
+dom 04 oct 2026 14:06:18 -05
+temp=61.2'C
+throttled=0x80008
+1400000
+EA-CryptoAgility Raspberry Pi benchmark
+Samples       : 10000
+Batch         : 100 operations/sample
+P_PROC        : 0.100000 W
+Policy bytes  : 273
+
+POLICY_MAC_CRYPTO           
+  mean       : 25.587240 us
+  median     : 25.433330 us
+  p95        : 26.419280 us
+  stddev     : 0.487587 us
+  energy med.: 0.002543333 mJ
+
+POLICY_MAC_FULL             
+  mean       : 27.309001 us
+  median     : 27.227090 us
+  p95        : 27.890630 us
+  stddev     : 0.389488 us
+  energy med.: 0.002722709 mJ
+
+POLICY_MAC_VERIFY           
+  mean       : 27.434652 us
+  median     : 27.254170 us
+  p95        : 28.483850 us
+  stddev     : 0.670518 us
+  energy med.: 0.002725417 mJ
+
+CHECKPOINT_HASH_128         
+  mean       : 7.839563 us
+  median     : 7.819790 us
+  p95        : 7.946870 us
+  stddev     : 0.074555 us
+  energy med.: 0.000781979 mJ
+
+CHECKPOINT_HASH_256         
+  mean       : 9.494026 us
+  median     : 9.431250 us
+  p95        : 9.780730 us
+  stddev     : 0.233700 us
+  energy med.: 0.000943125 mJ
+
+CHECKPOINT_HASH_512         
+  mean       : 12.719820 us
+  median     : 12.659370 us
+  p95        : 12.935940 us
+  stddev     : 0.226904 us
+  energy med.: 0.001265937 mJ
+
+Results written to:
+  ea_bench_samples.csv
+  ea_bench_summary.csv
+Benchmark sink: 124
+===== RUN 2 AFTER =====
+temp=66.1'C
+throttled=0x80008
+1400000
+===== RUN 3 BEFORE =====
+dom 04 oct 2026 14:09:09 -05
+temp=60.7'C
+throttled=0x80000
+600000
+EA-CryptoAgility Raspberry Pi benchmark
+Samples       : 10000
+Batch         : 100 operations/sample
+P_PROC        : 0.100000 W
+Policy bytes  : 273
+
+POLICY_MAC_CRYPTO           
+  mean       : 25.350692 us
+  median     : 25.346880 us
+  p95        : 25.473440 us
+  stddev     : 0.344183 us
+  energy med.: 0.002534688 mJ
+
+POLICY_MAC_FULL             
+  mean       : 27.236894 us
+  median     : 27.177600 us
+  p95        : 27.714070 us
+  stddev     : 0.388382 us
+  energy med.: 0.002717760 mJ
+
+POLICY_MAC_VERIFY           
+  mean       : 27.342677 us
+  median     : 27.223440 us
+  p95        : 27.994270 us
+  stddev     : 0.510156 us
+  energy med.: 0.002722344 mJ
+
+CHECKPOINT_HASH_128         
+  mean       : 7.800702 us
+  median     : 7.778650 us
+  p95        : 7.912500 us
+  stddev     : 0.092419 us
+  energy med.: 0.000777865 mJ
+
+CHECKPOINT_HASH_256         
+  mean       : 9.433880 us
+  median     : 9.390630 us
+  p95        : 9.554170 us
+  stddev     : 0.201470 us
+  energy med.: 0.000939063 mJ
+
+CHECKPOINT_HASH_512         
+  mean       : 12.656215 us
+  median     : 12.617710 us
+  p95        : 12.770310 us
+  stddev     : 0.194010 us
+  energy med.: 0.001261771 mJ
+
+Results written to:
+  ea_bench_samples.csv
+  ea_bench_summary.csv
+Benchmark sink: 124
+===== RUN 3 AFTER =====
+temp=66.6'C
+throttled=0x80008
+1400000
+===== RUN 4 BEFORE =====
+dom 04 oct 2026 14:12:00 -05
+temp=62.3'C
+throttled=0x80000
+600000
+EA-CryptoAgility Raspberry Pi benchmark
+Samples       : 10000
+Batch         : 100 operations/sample
+P_PROC        : 0.100000 W
+Policy bytes  : 273
+
+POLICY_MAC_CRYPTO           
+  mean       : 25.371757 us
+  median     : 25.300520 us
+  p95        : 25.903640 us
+  stddev     : 0.483710 us
+  energy med.: 0.002530052 mJ
+
+POLICY_MAC_FULL             
+  mean       : 27.169836 us
+  median     : 27.100000 us
+  p95        : 27.650520 us
+  stddev     : 0.500444 us
+  energy med.: 0.002710000 mJ
+
+POLICY_MAC_VERIFY           
+  mean       : 27.266652 us
+  median     : 27.122920 us
+  p95        : 28.049480 us
+  stddev     : 0.568005 us
+  energy med.: 0.002712292 mJ
+
+CHECKPOINT_HASH_128         
+  mean       : 7.797853 us
+  median     : 7.779690 us
+  p95        : 7.902080 us
+  stddev     : 0.073786 us
+  energy med.: 0.000777969 mJ
+
+CHECKPOINT_HASH_256         
+  mean       : 9.424727 us
+  median     : 9.390100 us
+  p95        : 9.524470 us
+  stddev     : 0.154262 us
+  energy med.: 0.000939010 mJ
+
+CHECKPOINT_HASH_512         
+  mean       : 12.655557 us
+  median     : 12.618750 us
+  p95        : 12.756770 us
+  stddev     : 0.161067 us
+  energy med.: 0.001261875 mJ
+
+Results written to:
+  ea_bench_samples.csv
+  ea_bench_summary.csv
+Benchmark sink: 124
+===== RUN 4 AFTER =====
+temp=67.1'C
+throttled=0x80008
+1400000
+===== RUN 5 BEFORE =====
+dom 04 oct 2026 14:14:50 -05
+temp=63.4'C
+throttled=0x80008
+1400000
+EA-CryptoAgility Raspberry Pi benchmark
+Samples       : 10000
+Batch         : 100 operations/sample
+P_PROC        : 0.100000 W
+Policy bytes  : 273
+
+POLICY_MAC_CRYPTO           
+  mean       : 25.292952 us
+  median     : 25.283340 us
+  p95        : 25.470840 us
+  stddev     : 0.263203 us
+  energy med.: 0.002528334 mJ
+
+POLICY_MAC_FULL             
+  mean       : 27.145466 us
+  median     : 27.132820 us
+  p95        : 27.261970 us
+  stddev     : 0.277111 us
+  energy med.: 0.002713282 mJ
+
+POLICY_MAC_VERIFY           
+  mean       : 27.156055 us
+  median     : 27.142180 us
+  p95        : 27.278120 us
+  stddev     : 0.569878 us
+  energy med.: 0.002714218 mJ
+
+CHECKPOINT_HASH_128         
+  mean       : 7.803814 us
+  median     : 7.779690 us
+  p95        : 7.906770 us
+  stddev     : 0.157642 us
+  energy med.: 0.000777969 mJ
+
+CHECKPOINT_HASH_256         
+  mean       : 9.435364 us
+  median     : 9.391150 us
+  p95        : 9.569270 us
+  stddev     : 0.193721 us
+  energy med.: 0.000939115 mJ
+
+CHECKPOINT_HASH_512         
+  mean       : 12.688934 us
+  median     : 12.625520 us
+  p95        : 12.974480 us
+  stddev     : 0.193885 us
+  energy med.: 0.001262552 mJ
+
+Results written to:
+  ea_bench_samples.csv
+  ea_bench_summary.csv
+Benchmark sink: 124
+===== RUN 5 AFTER =====
+temp=67.7'C
+throttled=0x80008
+1400000

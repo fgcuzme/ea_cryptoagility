@@ -4,12 +4,15 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-from .ea_crypto_costs import estimate_total_transaction_cost, operation_counts_for_policy
+# from .ea_crypto_costs import estimate_total_transaction_cost, operation_counts_for_policy
 from .ea_logger import EAEventLogger
 from .ea_policy_engine import compute_energy_pressure, select_policy
 from .ea_policy_metadata import build_policy_metadata, verify_policy_metadata
-from .ea_types import CrossLayerState, MessageType, PolicyTuple, Thresholds
+# from .ea_types import CrossLayerState, MessageType, PolicyTuple, Thresholds
 
+from .ea_crypto_costs import (estimate_crypto_cost, estimate_transaction_size_bytes,)
+from .ea_types import (CrossLayerState, MessageType, PolicyTuple, Thresholds, 
+                       ProfileID, CheckpointRule, RekeyRule, PayloadMode,)
 
 DEFAULT_POLICY_KEY = b"EA-CryptoAgility-U-Tangle-policy-key-v1"
 
@@ -32,27 +35,6 @@ def infer_message_type(tx: Dict[str, Any]) -> MessageType:
     except ValueError:
         return MessageType.TELEMETRY
 
-
-# def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[float, float]:
-#     """
-#     Extract residual and initial energy from UWSNsecure node dicts.
-#     Adjust keys if your node structure uses different names.
-#     """
-#     residual = (
-#         node.get("ResidualEnergy")
-#         or node.get("energy")
-#         or node.get("Energy")
-#         or node.get("E_res")
-#         or node.get("Battery")
-#         or default_initial
-#     )
-#     initial = (
-#         node.get("InitialEnergy")
-#         or node.get("E_init")
-#         or node.get("E0")
-#         or default_initial
-#     )
-#     return float(residual), float(initial)
 
 def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[float, float]:
     """
@@ -81,6 +63,143 @@ def node_energy(node: Dict[str, Any], default_initial: float = 100.0) -> tuple[f
             break
 
     return float(residual), float(initial)
+
+
+# Helper para reconstruir PolicyTuple
+def policy_tuple_from_dict(
+    policy_dict: Dict[str, Any],
+) -> PolicyTuple:
+    """
+    Reconstruye el PolicyTuple a partir del formato serializable
+    almacenado en tx["Policy"].
+    """
+
+    return PolicyTuple(
+        profile_id=ProfileID(
+            policy_dict["profile_id"]
+        ),
+        checkpoint_rule=CheckpointRule(
+            policy_dict["checkpoint_rule"]
+        ),
+        rekey_rule=RekeyRule(
+            policy_dict["rekey_rule"]
+        ),
+        payload_mode=PayloadMode(
+            policy_dict["payload_mode"]
+        ),
+    )
+
+# Helper para coste incremental EA
+def estimate_ea_incremental_processing(
+    policy: PolicyTuple,
+    *,
+    side: str,
+    checkpoint_amortization: float = 0.0,
+    checkpoint_input_bytes: int = 256,
+    rekey_triggered: bool = False,
+    already_accounted_ops=None,
+) -> Dict[str, Any]:
+    """
+    Calcula solamente el procesamiento ADICIONAL introducido por EA.
+
+    already_accounted_ops contiene operaciones que el baseline U-Tangle
+    ya descuenta mediante energia_dinamica.py.
+
+    DATA sender:
+        ASCON_AEAD_ENC ya contabilizado.
+
+    DATA receiver:
+        ASCON_AEAD_DEC ya contabilizado.
+    """
+
+    already_accounted_ops = set(
+        already_accounted_ops or []
+    )
+
+    full = estimate_crypto_cost(
+        policy,
+        side=side,
+        rekey_triggered=rekey_triggered,
+        checkpoint_amortization=checkpoint_amortization,
+        checkpoint_input_bytes=checkpoint_input_bytes,
+    )
+
+    incremental_time_ms = 0.0
+    incremental_energy_mj = 0.0
+
+    incremental_counts = {}
+    incremental_breakdown = {}
+
+    for op, data in full.get(
+        "operation_breakdown", {}
+    ).items():
+
+        if op in already_accounted_ops:
+            continue
+
+        count = float(data.get("count", 0.0))
+        time_ms = float(data.get("time_ms", 0.0))
+        energy_mj = float(
+            data.get("energy_mj", 0.0)
+        )
+
+        incremental_counts[op] = count
+
+        incremental_breakdown[op] = dict(data)
+
+        incremental_time_ms += time_ms
+        incremental_energy_mj += energy_mj
+
+    return {
+        "incremental_operation_counts":
+            incremental_counts,
+
+        "incremental_operation_breakdown":
+            incremental_breakdown,
+
+        "incremental_processing_time_ms":
+            incremental_time_ms,
+
+        "incremental_processing_energy_mj":
+            incremental_energy_mj,
+    }
+
+# Helper para descontar procesamiento EA del nodo
+def apply_incremental_processing_energy(
+    node: Dict[str, Any],
+    energy_mj: float,
+) -> float:
+    """
+    Descuenta del nodo la energía de procesamiento adicional EA.
+
+    Returns
+    -------
+    consumed_j : float
+        Energía realmente descontada en joules.
+    """
+
+    if node is None:
+        return 0.0
+
+    if "ResidualEnergy" not in node:
+        return 0.0
+
+    requested_j = max(
+        0.0,
+        float(energy_mj) / 1000.0,
+    )
+
+    before = float(node["ResidualEnergy"])
+
+    node["ResidualEnergy"] = max(
+        before - requested_j,
+        0.0,
+    )
+
+    return before - float(
+        node["ResidualEnergy"]
+    )
+
 
 def build_state_from_uwsnsecure(
     node: Dict[str, Any],
@@ -155,10 +274,49 @@ def attach_policy_to_transaction(
     tx["policy_meta"] = meta.as_dict()
     tx["ea_state"] = state.as_dict()
 
-    # Update optional cost fields.
-    # cost = estimate_total_transaction_cost(policy, retransmissions=int(round(retransmission_rate)))
-    cost = estimate_total_transaction_cost(policy, retransmissions=0)
-    tx["ea_cost"] = cost
+    # # Update optional cost fields.
+    # # cost = estimate_total_transaction_cost(policy, retransmissions=int(round(retransmission_rate)))
+    # cost = estimate_total_transaction_cost(policy, retransmissions=0)
+    # tx["ea_cost"] = cost
+
+    # ---------------------------------------------------------
+    # Initial EA accounting structure.
+    #
+    # No acoustic energy and no final processing cost are
+    # computed here. Those values are only known at the actual
+    # communication event.
+    # ---------------------------------------------------------
+
+    initial_size = estimate_transaction_size_bytes(
+        policy,
+        rekey_triggered=False,
+        checkpoint_amortization=0.0,
+    )
+
+    tx["ea_cost"] = {
+        **initial_size,
+
+        "processing_time_ms": 0.0,
+        "processing_energy_mj": 0.0,
+
+        "ea_sender_incremental_time_ms": 0.0,
+        "ea_sender_incremental_energy_mj": 0.0,
+
+        "ea_receiver_incremental_time_ms": 0.0,
+        "ea_receiver_incremental_energy_mj": 0.0,
+
+        "base_processing_energy_mj": 0.0,
+
+        "communication_energy_mj": 0.0,
+
+        "sender_event_energy_mj": 0.0,
+        "receiver_event_energy_mj": 0.0,
+
+        "total_energy_mj": 0.0,
+
+        "energy_scope": "NOT_FINALIZED",
+    }
+
     return tx
 
 

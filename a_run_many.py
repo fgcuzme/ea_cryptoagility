@@ -96,7 +96,8 @@ def run_batch(
                     Path(run_dir).mkdir(parents=True, exist_ok=True)
 
                     # env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
-                    env["PER_VARIABLE"] = PER_BY_SCENARIO.get(ea_scenario_id, "None")
+                    # env["PER_VARIABLE"] = PER_BY_SCENARIO.get(ea_scenario_id, "None")
+                    env["PER_VARIABLE"] = (os.environ.get("PER_VARIABLE","None"))
                     
                     # Diametro de la red
                     env["DIM_X"] = str(dim_x)
@@ -122,11 +123,20 @@ def run_batch(
 
                     # Energia inicial
                     env["UWSN_ENERGY_INITIAL_J"] = "50.0"
+
+                    # ============================================================
+                    # Minimal DATA ARQ
+                    # ============================================================
+                    env["UAN_MAX_DATA_RETRIES"] = (os.environ.get(
+                            "UAN_MAX_DATA_RETRIES", "1")
+                    )
+
+                    env["SIM_DURATION_S"] = (os.environ.get("SIM_DURATION_S","600",))
                     
                     # ------------------------------------------------------------
                     # Security experiment: IRR via policy_meta tampering
                     # ------------------------------------------------------------
-                    if SECURITY_IRR and ea_enabled == 1 and ea_scenario_id == "SC4_HIGH_RISK":
+                    if security_irr and ea_enabled == 1 and ea_scenario_id == "SC4_HIGH_RISK":
                         env["EA_ENABLE_POLICY_TAMPERING"] = "1"
                         env["EA_TAMPER_POLICY_PROB"] = "0.10"
                         env["EA_TAMPER_SCENARIOS"] = "SC4_HIGH_RISK"
@@ -145,14 +155,14 @@ def run_batch(
                     # env.setdefault("UWSN_TANGLE_BATCH", "64")       # flush CSV cada 64 eventos
                     # env.setdefault("UWSN_TANGLE_RESERVOIR", "1024") # p* cálculos
                     # ejecuta la simulación
-                    #subprocess.run(["python", "simulation_test1_light.py",
-                    #                "--output_dir", run_dir], env=env, check=True)
-                    subprocess.run(["./simulation_test1_light_arm",
-                                    "--output_dir", run_dir], env=env, check=True)
+                    subprocess.run(["python", "simulation_test1_light.py",
+                                   "--output_dir", run_dir], env=env, check=True)
+                    # subprocess.run(["./simulation_test1_light_arm",
+                    #                 "--output_dir", run_dir], env=env, check=True)
 
 if __name__ == "__main__":
 
-    SECURITY_IRR = True   # False: campaña normal / True: campaña DDR-IRR
+    SECURITY_IRR = False   # False: campaña normal / True: campaña DDR-IRR
 
     if SECURITY_IRR:
         ea_modes = [1]

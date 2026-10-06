@@ -21,6 +21,19 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     ENERGY_INI = os.environ.get("UWSN_ENERGY_INITIAL_J", "100.0")
     PER = os.environ.get("PER_VARIABLE", None)
     SPREADING = os.environ.get("SPREADING", "1.5")
+    
+    ###
+    MAX_DATA_RETRIES = int(os.environ.get("UAN_MAX_DATA_RETRIES","1",))
+    SIM_DURATION_S = float(os.environ.get("SIM_DURATION_S","600",))
+    if PER is None or str(PER).strip().lower() in {
+        "",
+        "none",
+        "null",
+    }:
+        PER_OVERRIDE = None
+    else:
+        PER_OVERRIDE = float(PER)
+    ###
 
     EA_ENABLED = int(os.environ.get("EA_ENABLED", "0"))
     EA_SCENARIO_ID = os.environ.get("EA_SCENARIO_ID", "SC1_NORMAL")
@@ -31,6 +44,15 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     output_dir = output_dir or f"stats/{RUN_ID}/"
     # os.makedirs("stats", exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
+    
+    ##
+    # snapshots de energía por fase
+    ENERGY_SNAPSHOT_CSV = os.path.join(output_dir,"energy_phase_snapshots.csv",)
+
+    # Cada run debe empezar con un archivo limpio.
+    if os.path.exists(ENERGY_SNAPSHOT_CSV):
+        os.remove(ENERGY_SNAPSHOT_CSV)
+    ##
 
     POLICY_KEY = b"EA-CryptoAgility-U-Tangle-policy-key-v1"
     EA_LOGGER = None
@@ -46,10 +68,14 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
             "scenario": {
                 "num_nodes": NUM_NODES,
                 "freq_khz": 20, "bitrate_bps": 9200,
-                "traffic_shipping = 0.5": float(SHIPPING), "wind_mps": float(WIND_SPEED),
+                "traffic_shipping": float(SHIPPING), "wind_mps": float(WIND_SPEED),
                 "spreading": float(SPREADING),
                 "E_init_J": float(ENERGY_INI), "threshold_bateria": float(0.10*float(ENERGY_INI)),
                 "per": str(PER),
+                # Colocar las variables globales
+                "arq": {"enabled": True,"ack_bits": 56,"max_data_retries": MAX_DATA_RETRIES},
+                "per_override": PER_OVERRIDE,
+                "sim_duration_s": SIM_DURATION_S,
                 # "ea_enabled": EA_ENABLED,
                 # "ea_scenario_id": EA_SCENARIO_ID,
                 # "scheme_id": SCHEME_ID
@@ -328,6 +354,59 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     print('-')
     ################
 
+    ###
+    def _write_energy_snapshot(
+        phase: str,
+        boundary: str,
+    ):
+        """
+        Guarda la energía residual de los nodos UWSN alimentados
+        por batería al inicio/final de cada fase.
+        El Sink se excluye deliberadamente porque se considera
+        infraestructura externamente alimentada.
+        """
+        file_exists = os.path.exists(ENERGY_SNAPSHOT_CSV)
+
+        fieldnames = [
+            "run_id",
+            "phase",
+            "boundary",
+            "node_id",
+            "role",
+            "cluster_id",
+            "cluster_head",
+            "residual_energy_j",
+        ]
+
+        with open(ENERGY_SNAPSHOT_CSV,"a", newline="",) as f:
+
+            writer = csv.DictWriter(
+                f,
+                fieldnames=fieldnames,
+            )
+
+            if not file_exists:
+                writer.writeheader()
+
+            for node in node_uw:
+                writer.writerow({
+                    "run_id": RUN_ID,
+                    "phase": str(phase),
+                    "boundary": str(boundary),
+                    "node_id": int(node["NodeID"]),
+                    "role": node.get("Role"),
+                    "cluster_id": node.get("NumCluster"),
+                    "cluster_head": node.get("ClusterHead"),
+                    "residual_energy_j":
+                        float(
+                            node.get(
+                                "ResidualEnergy",
+                                0.0,
+                            )
+                        ),
+                })
+    ###
+
     # #%%
     # # ###################
 
@@ -364,6 +443,13 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
 
     # #################
 
+    
+    #### snapshot de enegria, proceso de syn
+    _write_energy_snapshot(
+        "syn",
+        "start",
+    )
+    ####
 
     # %%    PROCESO DE SINCRONIZACIÓN
 
@@ -422,6 +508,19 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     print("FIN PROCESO DE SINCRONIZACIÓN CON TDMA")
     print("-")
 
+    #### snapshot de enegria proceso de syn
+    _write_energy_snapshot(
+        "syn",
+        "end",
+    )
+    ####    
+
+    #### snapshot de enegria proceso de auth
+    _write_energy_snapshot(
+        "auth",
+        "start",
+    )
+    #### 
 
     ##
     ######################
@@ -573,6 +672,20 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     from tangle_logger_light import flush_all
     flush_all()
 
+    #### snapshot de enegria proceso de auth
+    _write_energy_snapshot(
+        "auth",
+        "end",
+    )
+    #### 
+
+    #### snapshot de enegria proceso de data
+    _write_energy_snapshot(
+        "data",
+        "start",
+    )
+    #### 
+
     print("FIN PROCESO DE AUTENTICACIÓN BASADO EN TX")
     # ####
 
@@ -607,7 +720,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # =========================
     SEND_INTERVAL_S = 100           # intervalo fijo entre envíos SN -> CH
     # SIM_DURATION_S   = 3600         # ej: simulo 1h y proyecto a 24h
-    SIM_DURATION_S   = 600         # ej: simulo 10 y proyecto a 24h
+    # SIM_DURATION_S   = 600         # ej: simulo 10 y proyecto a 24h
     # PROJECT_TO_24H   = True
     PROJECTION_REF_S = 24*3600      # 86400
     # PROJECTION_FACTOR = (PROJECTION_REF_S / SIM_DURATION_S) if PROJECT_TO_24H else 1.0
@@ -673,12 +786,19 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
 
         # print("payload, (temp, salinity, pressure) : ", payload, (temp, salinity, pressure), "Tamaño binario del payload : ", len(payload))
 
+        # encrypted_msg = transmit_data(
+        #     RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
+        #     sender, ch_node, str(payload),
+        #     E_schedule, source='SN', dest='CH', ea_ctx=EA_CTX,
+        #     epoch=events_processed+1
+        # )
         encrypted_msg = transmit_data(
             RUN_ID, "bbdd_keys_shared_sign_cipher.db", node_uw,
-            sender, ch_node, str(payload),
-            E_schedule, source='SN', dest='CH', ea_ctx=EA_CTX,
-            epoch=events_processed+1
+            sender, ch_node, payload,
+            E_schedule, source="SN", dest="CH", ea_ctx=EA_CTX,
+            epoch=events_processed + 1,
         )
+
         # encrypted_str = encrypted_msg.hex()
         # buffer_CH[ch_id-1].append(encrypted_str)
         buffer_CH[ch_id-1].append(payload)
@@ -728,6 +848,13 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     # summarize_per_node()
     # summarize_global()
 
+    #### snapshot de enegria proceso de data
+    _write_energy_snapshot(
+        "data",
+        "end",
+    )
+    #### 
+
     print(f"\n--- Proyección a 24h ---")
     print(f"Ventana simulada: {SIM_DURATION_S/3600:.2f} h; factor F = {PROJECTION_FACTOR:.2f}")
     print("Multiplica: energía total, nº de paquetes y bits por F. Latencias por paquete NO se escalan.")
@@ -744,8 +871,22 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
 
     ### for
 
-    # sumarización de run
-    from transmission_summary_uan import summarize_global_by_run, summarize_per_node_by_run
+    # ============================================================
+    # Generación de estadísticas del run
+    # ============================================================
+
+    from transmission_summary_uan import (summarize_all_by_run)
+
+    summarize_all_by_run(
+        input_csv=os.environ[
+            "UWSN_EVENTS_CSV"
+        ],
+        output_dir=output_dir,
+        snapshot_csv=
+            ENERGY_SNAPSHOT_CSV,
+        sim_duration_s=
+            SIM_DURATION_S,
+    )
 
     # ###################
     print("-")

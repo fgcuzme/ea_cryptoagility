@@ -118,42 +118,83 @@ def consumo_tx_por_distancia_suavizado(distance_m: float) -> float:
         raise ValueError(f"Distancia fuera de rango: {distance_m} m")
 ##
 
-def calcular_energia_paquete(tipo_paquete, distance_m, es_tx=True):
+def calcular_energia_paquete(
+    tipo_paquete,
+    distance_m,
+    es_tx=True,
+    packet_bits=None,
+    bitrate=9200
+):
     """
-    Calcula la energía para transmitir o recibir un paquete según su tipo y tamaño.
+    Calcula la energía TX/RX para el tamaño real del paquete.
 
-    Parámetros:
-    tipo_paquete: str, puede ser "sync", "control", "data", "agg"
-    es_tx: bool, True si es transmisión, False si es recepción
-
-    Retorna:
-    Energía estimada en julios.
+    Si packet_bits=None se conserva exactamente el comportamiento
+    original de U-Tangle mediante los tamaños nominales por tipo.
     """
-    # Parámetros base
-    # potencia_tx = 2.5        # W
-    # potencia_tx = consumo_tx_por_distancia(distance_m)
+
     potencia_tx = consumo_tx_por_distancia_suavizado(distance_m)
-    potencia_rx = 0.8       # W
-    bitrate = 9200          # bps
+    potencia_rx = 0.8
 
-    # Tamaños típicos
     tamanos = {
-        "sync": 7 * 8,      # 7 Bytes
-        "tx": 185 * 8,      # 185 Bytes
-        "data": 70 * 8,     # 70 Bytes
-        "agg": 103 * 8,     # 103 Bytes
-        "ack": 7 * 8        # 7 Bytes
+        "sync": 7 * 8,
+        "tx":   185 * 8,
+        "data": 70 * 8,
+        "agg":  103 * 8,
+        "ack":  7 * 8,
     }
 
     if tipo_paquete not in tamanos:
-        raise ValueError("Tipo de paquete desconocido.")
+        raise ValueError(
+            f"Tipo de paquete desconocido: {tipo_paquete}"
+        )
 
-    bits = tamanos[tipo_paquete]
-    tiempo = bits / bitrate  # duración del envío
+    if packet_bits is None:
+        bits = tamanos[tipo_paquete]
+    else:
+        bits = max(0, int(packet_bits))
+
+    tiempo = bits / float(bitrate)
 
     potencia = potencia_tx if es_tx else potencia_rx
-    energia = potencia * tiempo
-    return energia
+
+    return potencia * tiempo
+
+# def calcular_energia_paquete(tipo_paquete, distance_m, es_tx=True):
+#     """
+#     Calcula la energía para transmitir o recibir un paquete según su tipo y tamaño.
+
+#     Parámetros:
+#     tipo_paquete: str, puede ser "sync", "control", "data", "agg"
+#     es_tx: bool, True si es transmisión, False si es recepción
+
+#     Retorna:
+#     Energía estimada en julios.
+#     """
+#     # Parámetros base
+#     # potencia_tx = 2.5        # W
+#     # potencia_tx = consumo_tx_por_distancia(distance_m)
+#     potencia_tx = consumo_tx_por_distancia_suavizado(distance_m)
+#     potencia_rx = 0.8       # W
+#     bitrate = 9200          # bps
+
+#     # Tamaños típicos
+#     tamanos = {
+#         "sync": 7 * 8,      # 7 Bytes
+#         "tx": 185 * 8,      # 185 Bytes
+#         "data": 70 * 8,     # 70 Bytes
+#         "agg": 103 * 8,     # 103 Bytes
+#         "ack": 7 * 8        # 7 Bytes
+#     }
+
+#     if tipo_paquete not in tamanos:
+#         raise ValueError("Tipo de paquete desconocido.")
+
+#     bits = tamanos[tipo_paquete]
+#     tiempo = bits / bitrate  # duración del envío
+
+#     potencia = potencia_tx if es_tx else potencia_rx
+#     energia = potencia * tiempo
+#     return energia
 
 def energy_listen(t_escucha_s):
     return P_LISTEN * t_escucha_s
@@ -251,7 +292,8 @@ def update_energy_standby_others(all_nodes, active_ids, active_cluster_id, t_int
 
 
 # Función para actualizar la energía de un nodo basado en su distancia al CH o Sink
-def update_energy_node_tdma(node, target_pos, E_schedule, timeout, type_packet, role="SN", action="tx", verbose=False, t_verif_s=0.0):
+def update_energy_node_tdma(node, target_pos, E_schedule, timeout, type_packet, role="SN", action="tx", 
+                            verbose=False, t_verif_s=0.0,packet_bits=None,bitrate=9200,):
     """
     Actualiza la energía del nodo considerando su rol (CH o SN) en TDMA.
     Parámetros:
@@ -284,11 +326,13 @@ def update_energy_node_tdma(node, target_pos, E_schedule, timeout, type_packet, 
     dist = np.linalg.norm(node["Position"] - target_pos)    # se debe comentar 10/09/2025
     # Energía según acción
     if action == "tx":
-        E_tx = calcular_energia_paquete(type_packet, dist, es_tx=True)
+        # E_tx = calcular_energia_paquete(type_packet, dist, es_tx=True)
+        E_tx = calcular_energia_paquete(type_packet, dist, es_tx=True, packet_bits=packet_bits, bitrate=bitrate,)
         if role == "CH":
             E_sched = E_schedule
     elif action == "rx":
-        E_rx = calcular_energia_paquete(type_packet, dist, es_tx=False)
+        #E_rx = calcular_energia_paquete(type_packet, dist, es_tx=False)
+        E_rx = calcular_energia_paquete(type_packet, dist, es_tx=False, packet_bits=packet_bits, bitrate=bitrate,)
 
     # Energía en escucha o standby (según rol)
     # 3) pasivo (listen/standby) durante guard y timeout
@@ -313,10 +357,6 @@ def update_energy_node_tdma(node, target_pos, E_schedule, timeout, type_packet, 
         print(f"[{role}-{action}] TX:{E_tx:.6f} RX:{E_rx:.6f} Guard:{E_guard:.6f} Timeout:{E_timeout:.6f} "
               f"Sched:{E_sched:.2e} Proc:{E_proc:.6f}  → Total:{E_total:.6f} J  | Residual:{node['ResidualEnergy']:.6f} J")
         
-    # if verbose:
-    #     print(f"[{role} - {action.upper()}] TX: {E_tx:.6f}, RX: {E_rx:.6f}, Guard: {E_guard:.6f}, Timeout: {E_timeout:.6f}, Schedule: {E_sched:.2e}")
-    #     print(f"→ Total: {E_total:.6f} J | Residual: {node['ResidualEnergy']:.6f} J")
-
     return node
 
 
@@ -354,92 +394,3 @@ def update_energy_failed_rx(node, target_pos, timeout, role="SN", verbose=False)
 #     p_tx = consumo_tx_por_distancia_suavizado(d)
 #     print(f"{d:>12} | {p_tx:>13.6f}")
 
-
-
-#####
-# # # Función para actualizar la energía de un nodo basado en su distancia al CH o Sink
-# # def update_energy_node_tdma1(node, target_pos, E_schedule, timeout, type_packet, is_ch=False):
-# #     """
-# #     Actualiza la energía del nodo considerando su rol (CH o SN) en TDMA.
-# #     Parámetros:
-# #     - node: Diccionario con los datos del nodo (incluye Position y ResidualEnergy)
-# #     - target_pos: Posición del objetivo (Sink para CHs, CH para SNs)
-# #     - is_ch: Booleano que indica si el nodo es Cluster Head
-# #     - E_schedule: Energía de programación TDMA (solo para CHs)
-# #     - timeout: Tiempo máximo de espera para ACK
-
-# #     Retorna:
-# #     - El nodo con su energía residual actualizada
-# #     """
-
-# #     # # 3. Margen científico (3 componentes) para el calculo de Guard_time
-# #     # jitter_margin = 0.01  # 10 ms (jitter de hardware)
-# #     # doppler_margin = 0.02 * delta_dist/v_sound  # Efecto Doppler (2%)
-# #     # safety_margin = 0.03  # 30 ms adicionales
-
-# #     # 1. Calcular distancia y tiempo de propagación (guard_time)
-# #     dist = np.linalg.norm(node["Position"] - target_pos)    # se debe comentar 10/09/2025
-
-# #     # guard_time = propagation_time(dist, node["Position"], target_pos)   # se comenta
-
-# #     guard_time = propagation_time1(node["Position"], target_pos, depth=None, region="standard")
-
-# #     # 2. Calcular energía de transmisión según rol
-# #     if is_ch:
-# #         # CH: energía de tx + scheduling TDMA
-# #         Et = calcular_energia_paquete(type_packet, dist, es_tx=True) + E_schedule
-# #     else:
-# #         # SN: solo energía de tx
-# #         Et = calcular_energia_paquete(type_packet, dist, es_tx=True)
-
-# #     # 3. Energía de recepción (igual para CH y SN)
-# #     Er = calcular_energia_paquete(type_packet, dist, es_tx=False)
-
-# #     # 4. Energía durante tiempos muertos
-# #     if is_ch:
-# #         # CH gasta energía en escucha (listen) durante guard_time y timeout
-# #         E_guard = energy_listen(guard_time)
-# #         E_timeout = energy_listen(timeout)
-# #     else:
-# #         # SN gasta energía en standby durante guard_time y escucha durante timeout
-# #         E_guard = energy_standby(guard_time)
-# #         E_timeout = energy_listen(timeout)
-
-# #     # 5. Actualizar energía total
-# #     energy_consumed = Et + Er + E_guard + E_timeout
-# #     print("Energia consumida : ", energy_consumed, "E_guard : ", E_guard, "E_timeout : ", E_timeout)
-# #     #time.sleep(5)
-
-# #     node["ResidualEnergy"] = max(node["ResidualEnergy"] - energy_consumed, 0)  # No negativa
-
-# #     return node
-
-
-# # def calculate_guard_time(cluster_nodes, ch_pos):
-# #     """
-# #     Calcula el guard_time variable para un cluster submarino.
-
-# #     Args:
-# #         cluster_nodes: Lista de nodos en el cluster
-# #         ch_pos: Posición del CH
-# #         temp, salinity, depth: Parámetros ambientales
-
-# #     Returns:
-# #         guard_time en segundos
-# #     """
-# #     # 1. Calcular dispersión de retardos
-# #     distances = [np.linalg.norm(node["Position"] - ch_pos) for node in cluster_nodes]
-# #     delta_dist = max(distances) - min(distances)
-
-# #     # 2. Obtener velocidad del sonido
-# #     v_sound = 1449.2 + 4.6*temp - 0.055*temp**2 + 0.00029*temp**3 + \
-# #               (1.34 - 0.01*temp)*(salinity - 35) + 0.016*depth
-
-# #     # 3. Margen científico (3 componentes)
-# #     jitter_margin = 0.01  # 10 ms (jitter de hardware)
-# #     doppler_margin = 0.02 * delta_dist/v_sound  # Efecto Doppler (2%)
-# #     safety_margin = 0.03  # 30 ms adicionales
-
-# #     guard_time = (delta_dist / v_sound) + jitter_margin + doppler_margin + safety_margin
-
-# #     return max(guard_time, 0.05)  # Mínimo 50 ms

@@ -1,0 +1,59 @@
+pi@raspberrypi:~/Desktop/bench_ea $ date
+uname -a
+lscpu
+gcc --version
+openssl version
+vcgencmd measure_temp
+vcgencmd get_throttled
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+dom 04 oct 2026 13:49:59 -05
+Linux raspberrypi 6.6.74+rpt-rpi-v8 #1 SMP PREEMPT Debian 1:6.6.74-1+rpt1 (2025-01-27) aarch64 GNU/Linux
+Architecture:             aarch64
+  CPU op-mode(s):         32-bit, 64-bit
+  Byte Order:             Little Endian
+CPU(s):                   4
+  On-line CPU(s) list:    0-3
+Vendor ID:                ARM
+  Model name:             Cortex-A53
+    Model:                4
+    Thread(s) per core:   1
+    Core(s) per cluster:  4
+    Socket(s):            -
+    Cluster(s):           1
+    Stepping:             r0p4
+    CPU(s) scaling MHz:   100%
+    CPU max MHz:          1400,0000
+    CPU min MHz:          600,0000
+    BogoMIPS:             38,40
+    Flags:                fp asimd evtstrm crc32 cpuid
+Caches (sum of all):      
+  L1d:                    128 KiB (4 instances)
+  L1i:                    128 KiB (4 instances)
+  L2:                     512 KiB (1 instance)
+NUMA:                     
+  NUMA node(s):           1
+  NUMA node0 CPU(s):      0-3
+Vulnerabilities:          
+  Gather data sampling:   Not affected
+  Itlb multihit:          Not affected
+  L1tf:                   Not affected
+  Mds:                    Not affected
+  Meltdown:               Not affected
+  Mmio stale data:        Not affected
+  Reg file data sampling: Not affected
+  Retbleed:               Not affected
+  Spec rstack overflow:   Not affected
+  Spec store bypass:      Not affected
+  Spectre v1:             Mitigation; __user pointer sanitization
+  Spectre v2:             Not affected
+  Srbds:                  Not affected
+  Tsx async abort:        Not affected
+gcc (Debian 12.2.0-14+deb12u1) 12.2.0
+Copyright (C) 2022 Free Software Foundation, Inc.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+
+OpenSSL 3.0.22 25 Aug 2026 (Library: OpenSSL 3.0.22 25 Aug 2026)
+temp=61.2'C
+throttled=0x80008
+ondemand
