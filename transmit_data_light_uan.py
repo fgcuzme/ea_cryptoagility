@@ -3171,9 +3171,13 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
     # Retry statistics
     # ============================================================
-    # Estos contadores serán posteriormente la fuente de Ret_i(t).
-    # No calculamos todavía aquí el riesgo SR.
-    # Solo almacenamos observaciones reales.
+    # Contadores acumulados exclusivamente para diagnóstico,
+    # trazabilidad y validación experimental.
+    # IMPORTANTE:
+    # Estos contadores NO alimentan directamente Ret_i(t).
+    # El policy engine utiliza la ventana temporal mantenida por:
+    #     update_cross_layer_observation()
+    # en integration_hooks.py.
     # ============================================================
     if ea_ctx is not None:
         retry_stats = ea_ctx.setdefault("_retry_stats", {})
