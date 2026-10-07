@@ -718,6 +718,10 @@ from ea_cryptoagility.ea_profiles import (
 )
 from ea_cryptoagility.integration_hooks import (
     attach_policy_to_transaction,
+    verify_transaction_policy,
+    maybe_tamper_policy_metadata,
+    update_cross_layer_observation,
+
     log_ea_transaction,
     policy_tuple_from_dict,
     estimate_ea_incremental_processing,
@@ -867,19 +871,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
 
     if source == "SN":
-        nominal_ascon_plaintext_bytes = (
-            ASCON_PLAINTEXT_SN_BYTES
-        )
-        expected_protected_field_bytes = (
-            PROTECTED_FIELD_SN_BYTES
-        )
+        nominal_ascon_plaintext_bytes = (ASCON_PLAINTEXT_SN_BYTES)
+        expected_protected_field_bytes = (PROTECTED_FIELD_SN_BYTES)
     else:
-        nominal_ascon_plaintext_bytes = (
-            ASCON_PLAINTEXT_CH_BYTES
-        )
-        expected_protected_field_bytes = (
-            PROTECTED_FIELD_CH_BYTES
-        )
+        nominal_ascon_plaintext_bytes = (ASCON_PLAINTEXT_CH_BYTES)
+        expected_protected_field_bytes = (PROTECTED_FIELD_CH_BYTES)
 
     # ------------------------------------------------------------
     # Prepare fixed cryptographic workload
@@ -893,10 +889,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
     # Tamaño útil REAL de aplicación antes de padding,
     # nonce, tag, headers y overhead EA.
-    application_payload_bits = (
-        int(application_plaintext_bytes)
-        * 8
-    )
+    application_payload_bits = (int(application_plaintext_bytes) * 8)
 
     # ------------------------------------------------------------
     # Functional Ascon encryption
@@ -943,13 +936,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # Raspberry Pi 3 / U-Tangle baseline
     # ------------------------------------------------------------
 
-    t_enc_s = float(
-        OPS_TIME["encrypt_s"]
-    )
-
-    t_dec_s = float(
-        OPS_TIME["descrypt_s"]
-    )
+    t_enc_s = float(OPS_TIME["encrypt_s"])
+    t_dec_s = float(OPS_TIME["descrypt_s"])
 
     # 4) Geometría + tiempos físicos
     start_pos = np.array(sender_node["Position"])
@@ -957,28 +945,24 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     distance  = float(np.linalg.norm(start_pos - end_pos))
     t_prop_s  = float(propagation_time1(start_pos, end_pos, depth=None, region="standard"))
 
-
     ## nuevo
     # # 4.1) Tamaño base realmente transmitido: ciphertext ASCON + header
     # if source == 'SN':
     #     header_bytes = 10      # header paquete DATA desde sensores
     # else:
     #     header_bytes = 11      # header paquete agregado CH -> Sink
-
     # normal_bits_sent = int((len(encrypted_msg) * 8) + (header_bytes * 8))
     # bits_sent = normal_bits_sent
 
     # ============================================================
     # 4.1) Baseline U-Tangle packet size
     # ============================================================
-
     if source == "SN":
         header_bytes = HEADER_BYTES_SN
         base_frame_bytes = BASE_DATA_BYTES
     else:
         header_bytes = HEADER_BYTES_CH
         base_frame_bytes = BASE_AGG_DATA_BYTES
-
 
     # El campo protegido ya fue determinado y validado
     # inmediatamente después de la operación Ascon.
@@ -987,8 +971,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     normal_bits_sent = (modeled_payload_bits + header_bytes * 8)
 
     assert (
-        normal_bits_sent
-        == base_frame_bytes * 8
+        normal_bits_sent == base_frame_bytes * 8
     ), (
         "Inconsistent U-Tangle baseline packet size: "
         f"{normal_bits_sent / 8:.0f} B != "
@@ -1013,31 +996,43 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         bitrate=bitrate
     )
 
+    ####
     if ea_enabled:
         scenario = ea_ctx["scenario"]
 
-        # Para los escenarios sintéticos SC1-SC5, usamos el peor caso entre
-        # el PER físico preliminar y el PER definido por el escenario.
-        # Esto permite que SC3_DEGRADED_CHANNEL active S2/S4 aunque el enlace
-        # físico puntual salga demasiado bueno.
-        policy_per = max(float(per_link_pre), float(getattr(scenario, "per", 0.0)))
+        # ========================================================
+        # Cross-layer state initialization
+        # ========================================================
+        # IMPORTANTE:
+        # El escenario NO decide directamente PER_i(t), Ret_i(t),
+        # Inv_i(t) o SR_i(t).
+        # per_link_pre se utiliza únicamente como estimación PHY
+        # inicial si el nodo todavía no dispone de observaciones
+        # históricas.
+        # Después de la primera transmisión, integration_hooks.py
+        # utilizará la ventana observada.
+        # ========================================================
+        policy_per = float(per_link_pre)
+
+        # DAG load todavía no dispone de un observador real.
+        # No utilizamos scenario.dag_load para evitar que SC5
+        # determine directamente la política.
+        # Más adelante conectaremos aquí una métrica real del Tangle.
+        observed_dag_load = float(
+            ea_ctx.get("observed_dag_load", 0.0,)
+        )
 
         if epoch is None:
             epoch = 1
 
-        message_type_ea = _ea_select_message_type_from_scenario(
-            scenario,
-            default="TELEMETRY"
+        # El escenario puede seguir definiendo el MIX DE TRÁFICO.
+        # Eso no equivale a prefabricar el riesgo.
+        message_type_ea = (
+            _ea_select_message_type_from_scenario(scenario, default="TELEMETRY",)
         )
 
+        
         tx_ea = {
-            # --------------------------------------------------------
-            # ID determinista:
-            #
-            # ya no depende del reloj del host.
-            # Esto permite comparar eventos entre ejecuciones con la
-            # misma seed.
-            # --------------------------------------------------------
             "ID": _ea_next_tx_id(
                 ea_ctx=ea_ctx,
                 sender_id=sender_id,
@@ -1048,18 +1043,23 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     else "AGG"
                 ),
             ),
-            "Source":
-                sender_id,
-            "Type":
+
+            "Source": sender_id,
+
+            "Type": (
                 "DATA"
                 if source == "SN"
-                else "AGG",
-            "message_type":
-                message_type_ea,
-            "Payload":
+                else "AGG"
+            ),
+
+            "message_type": message_type_ea,
+
+            "Payload": (
                 plaintext
                 if isinstance(plaintext, str)
-                else str(plaintext),
+                else str(plaintext)
+            ),
+
             "ApprovedTx": [],
         }
 
@@ -1068,14 +1068,15 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             node=sender_node,
             epoch=epoch,
             key=ea_ctx["policy_key"],
+            # PHY inicial solamente.
             per=policy_per,
-            retransmission_rate=scenario.retransmission_rate,
-            dag_load=scenario.dag_load,
-            security_risk=scenario.security_risk,
-            invalid_signature_rate=scenario.invalid_signature_rate,
-            downgrade_detected=scenario.downgrade_detected,
-            replay_detected=scenario.replay_detected,
-            suspicious_identity=scenario.suspicious_identity,
+            # Hasta conectar observador DAG real.
+            dag_load=observed_dag_load,
+            # MUY IMPORTANTE:
+            # activa observation_state + policy_memory.
+            ea_ctx=ea_ctx,
+            # Estado asociado al enlace actual.
+            neighbor_id=receiver_id,
         )
 
         ea_cost = tx_ea.setdefault("ea_cost", {})
@@ -1423,21 +1424,16 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             # CHECKPOINT / REKEY EVENT
             # ========================================================
 
-            "checkpoint_k":
-                checkpoint_k,
+            "checkpoint_k": checkpoint_k,
 
-            "checkpoint_due":
-                checkpoint_due,
+            "checkpoint_due": checkpoint_due,
 
             # Legacy fields kept temporarily
-            "checkpoint_amortization_k":
-                checkpoint_k,
+            "checkpoint_amortization_k": checkpoint_k,
 
-            "checkpoint_amortization":
-                checkpoint_factor,
+            "checkpoint_amortization": checkpoint_factor,
 
-            "rekey_triggered":
-                rekey_triggered,
+            "rekey_triggered": rekey_triggered,
 
             # ========================================================
             # EA SENDER PROCESSING
@@ -1466,6 +1462,19 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 ],
         })
         ####
+    ####
+
+    ## add
+    # ============================================================
+    # Controlled in-transit policy tampering
+    # ============================================================
+    # Se ejecuta DESPUÉS de que el sender haya generado policy_meta.
+    # Representa modificación del metadata "on the wire".
+    # No altera la política original usada para calcular los costes.
+    # ============================================================
+    if (ea_enabled and tx_ea is not None):
+        tx_ea = maybe_tamper_policy_metadata(tx_ea, ea_ctx,)
+    ##
 
     # Tiempo de transmisión y PER final con el tamaño realmente usado.
     t_tx_s = bits_sent / float(bitrate)
@@ -1513,6 +1522,20 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         per=per_link,
         override_per=effective_per_override,
     )
+
+    # ============================================================
+    # Observed DATA attempt -> PER_i(t)
+    # ============================================================
+    # Este evento ocurrió DESPUÉS de seleccionar π_i(t).
+    # Por tanto afectará únicamente a la próxima decisión.
+    # ============================================================
+
+    if ea_enabled:
+        update_cross_layer_observation(
+            ea_ctx,
+            sender_id,
+            data_success=bool(channel_success),
+        )
 
     # ------------------------------------------------------------
     # Resultado inicial.
@@ -1638,30 +1661,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         snr_db=snr_db, per=per_link, lat_dag_ms=0.0, SL_db=SL_db, EbN0_db=EbN0_db, BER=ber
     )
 
-    # ## registro evento ea
-    # if ea_ctx is not None and ea_ctx.get("enabled", False) and tx_ea is not None:
-    #     tx_ea["ea_state"]["snr_db"] = snr_db
-
-    #     log_ea_transaction(
-    #         logger=ea_ctx["logger"],
-    #         run_id=ea_ctx["run_id"],
-    #         seed=ea_ctx["seed"],
-    #         scenario_id=ea_ctx["scenario_id"],
-    #         tx=tx_ea,
-    #         latency_ms=(t_prop_s + t_tx_s + t_enc_s) * 1000.0,
-    #         pdr=1.0 if success else 0.0,
-    #         downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-    #         invalid_policy_meta=False,
-    #         invalid_tx_rejected=False,
-    #     )
-    # ###
-
     # Se actualiza la energia de los demas nodos
     active_ids = [sender_id, receiver_id]
     active_cluster_id = sender_node["ClusterHead"]
     nodes = update_energy_standby_others(nodes, active_ids, active_cluster_id,
                                          timeout_s, verbose=VERBOSE)
-
 
     # ============================================================
     # 8) Si el paquete llega: energía RX + descifrado + EA policy
@@ -1684,6 +1688,14 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     receiver_ea_proc_s = 0.0    # s: procesamiento adicional EA
     receiver_incremental = None
     decrypted_msg = None
+
+    ###
+    # EA verification state
+    ea_policy_verification_attempted = False
+    ea_policy_valid = None
+    # Para el logger final.
+    invalid_policy_meta_detected = False
+    ###
 
     # ============================================================
     # El frame llegó físicamente al receptor
@@ -1750,8 +1762,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     #       0.0 -> no existe checkpoint
                     #       1.0 -> checkpoint completo
                     # ------------------------------------------------
-                    checkpoint_amortization=
-                        checkpoint_factor,
+                    checkpoint_amortization=checkpoint_factor,
 
                     # Provisional hasta cerrar el tamaño real del
                     # material serializado usado como checkpoint.
@@ -1759,13 +1770,10 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
                     # Solo se incluyen X25519/HKDF si realmente
                     # ocurrió un evento de rekey.
-                    rekey_triggered=
-                        rekey_triggered,
+                    rekey_triggered=rekey_triggered,
 
                     # Ascon DEC pertenece al baseline.
-                    already_accounted_ops={
-                        "ASCON_AEAD_DEC"
-                    },
+                    already_accounted_ops={"ASCON_AEAD_DEC"},
                 )
             )
 
@@ -1836,6 +1844,70 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     float(receiver_incremental["incremental_processing_energy_mj"]),
             })
 
+            ###
+            # ========================================================
+            # Functional EA policy verification
+            # ========================================================
+            # Ascon ya aceptó el ciphertext.
+            # Ahora verificamos realmente policy_meta.
+            # IMPORTANTE:
+            # receiver_incremental ya fue calculado antes, por lo que
+            # una política inválida sigue consumiendo energía/tiempo
+            # de verificación.
+            # ========================================================
+            ea_policy_verification_attempted = True
+
+            ea_policy_valid = (
+                verify_transaction_policy(
+                    tx=tx_ea,
+                    node=receiver_node,
+                    epoch=epoch,
+                    key=ea_ctx["policy_key"],
+                )
+            )
+
+            if not ea_policy_valid:
+                invalid_policy_meta_detected = True
+
+            # --------------------------------------------------------
+            # Downgrade observable
+            # --------------------------------------------------------
+            # Solo clasificamos como downgrade el experimento donde
+            # explícitamente se modificó profile_id.
+            # Un policy_mac corrupto sigue siendo policy tampering,
+            # pero no lo llamamos automáticamente "downgrade".
+            # --------------------------------------------------------
+
+            downgrade_observed = bool(
+                tx_ea.get("policy_tamper_injected", False,)
+                and
+                tx_ea.get("tampered_policy_field", "",) == "profile_id"
+                and
+                not ea_policy_valid
+            )
+
+            # --------------------------------------------------------
+            # Inv_i(t) se registra en el RECEPTOR:
+            # es quien observó la verificación inválida.
+            # --------------------------------------------------------
+
+            update_cross_layer_observation(
+                ea_ctx,
+                receiver_id,
+                verification_valid=bool(ea_policy_valid),
+                # False también es significativo:
+                # una siguiente verificación limpia borra una evidencia
+                # de downgrade puntual y permite iniciar cooldown S3.
+                downgrade_detected=downgrade_observed,
+            )
+
+            # --------------------------------------------------------
+            # Rechazo de protocolo
+            # --------------------------------------------------------
+            if not ea_policy_valid:
+                success = False
+                bits_rcv = 0
+            ###
 
         # --------------------------------------------------------
         # Tiempo total de procesamiento observado en RX
@@ -2015,17 +2087,10 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
             bitrate=bitrate,
             freq_khz=20,
-
-            lat_prop_ms=
-                t_prop_s * 1000.0,
-
-            lat_tx_ms=
-                t_tx_s * 1000.0,
-
+            lat_prop_ms=t_prop_s * 1000.0,
+            lat_tx_ms=t_tx_s * 1000.0,
             # Procesamiento RX completo:
-            lat_proc_ms=
-                receiver_total_proc_s * 1000.0,
-
+            lat_proc_ms=receiver_total_proc_s * 1000.0,
             snr_db=snr_db,
             per=per_link,
             lat_dag_ms=0.0,
@@ -2482,10 +2547,18 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         retry_channel_success = (
             propagate_with_probability(
                 per=per_link,
-                override_per=
-                    effective_per_override,
+                override_per=effective_per_override,
             )
         )
+        
+        ###
+        if ea_enabled:
+            update_cross_layer_observation(
+                ea_ctx,
+                sender_id,
+                data_success=bool(retry_channel_success),
+            )
+        ###
 
         # ========================================================
         # Log DATA retry TX
@@ -2619,29 +2692,57 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     )
 
                     for op, count in (
-                        retry_receiver_incremental[
-                            "incremental_operation_counts"
-                        ].items()
+                        retry_receiver_incremental["incremental_operation_counts"].items()
                     ):
 
                         retry_receiver_ops[op] = (
-                            float(
-                                retry_receiver_ops.get(
-                                    op,
-                                    0.0
-                                )
-                            )
+                            float(retry_receiver_ops.get(op, 0.0))
                             + float(count)
                         )
 
                     retry_rx_ea_proc_s = (
                         float(
-                            retry_receiver_incremental[
-                                "incremental_processing_time_ms"
-                            ]
-                        )
-                        / 1000.0
+                            retry_receiver_incremental["incremental_processing_time_ms"]
+                        ) / 1000.0
                     )
+
+                    ## add
+                    # ========================================================
+                    # Functional EA verification during first valid retry RX
+                    # ========================================================
+                    retry_policy_valid = (
+                        verify_transaction_policy(
+                            tx=tx_ea,
+                            node=receiver_node,
+                            epoch=epoch,
+                            key=ea_ctx["policy_key"],
+                        )
+                    )
+
+                    ea_policy_verification_attempted = True
+
+                    if not retry_policy_valid:
+                        invalid_policy_meta_detected = True
+
+                    retry_downgrade_observed = bool(
+                        tx_ea.get("policy_tamper_injected", False,)
+                        and
+                        tx_ea.get("tampered_policy_field", "",) == "profile_id"
+                        and
+                        not retry_policy_valid
+                    )
+
+                    update_cross_layer_observation(
+                        ea_ctx,
+                        receiver_id,
+                        verification_valid=bool(retry_policy_valid),
+
+                        downgrade_detected=retry_downgrade_observed,
+                    )
+
+                    if not retry_policy_valid:
+                        retry_accepted = False
+                    ###
             else:
                 # ------------------------------------------------
                 # El frame es un duplicado ocasionado por ACK loss.
@@ -2713,16 +2814,12 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 # ------------------------------------------------
                 if (
                     not duplicate_delivery
-                    and retry_accepted
                     and ea_enabled
                     and tx_ea is not None
-                    and retry_receiver_incremental
-                        is not None
+                    and retry_receiver_incremental is not None
                 ):
                     retry_receiver_inc_mj = float(
-                        retry_receiver_incremental[
-                            "incremental_processing_energy_mj"
-                        ]
+                        retry_receiver_incremental["incremental_processing_energy_mj"]
                     )
                     E_retry_ea_receiver = (
                         apply_incremental_processing_energy(
@@ -2746,10 +2843,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     retry_rx_proc_s
                 )
                 # Procesamiento EA solo si Ascon aceptó el frame.
-                if retry_accepted:
-                    retry_ea_processing_time_s += (
-                        retry_rx_ea_proc_s
-                    )
+                if retry_receiver_incremental is not None:
+                    retry_ea_processing_time_s += (retry_rx_ea_proc_s)
 
             # ====================================================
             # Processing-energy bookkeeping
@@ -2769,10 +2864,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 )
                 # EA processing solo ocurre después de una aceptación
                 # Ascon válida.
-                if retry_accepted:
-                    retry_ea_processing_energy_j += (
-                        E_retry_ea_receiver
-                    )
+                if retry_receiver_incremental is not None:
+                    retry_ea_processing_energy_j += (E_retry_ea_receiver)
 
             # ====================================================
             # Cryptographic reject during retry
@@ -3046,25 +3139,35 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         # Total energy of this DATA retry
         # ========================================================
         retry_data_energy_j += (
-            E_retry_tx
-            + E_retry_rx
-            + E_retry_ea_receiver
+            E_retry_tx + E_retry_rx + E_retry_ea_receiver
         )
 
     # ============================================================
     # Final logical DATA result
     # ============================================================
-    success = bool(
-        accepted_once
-    )
-
-    bits_rcv = (
-        bits_sent
-        if success
-        else 0
-    )
+    success = bool(accepted_once)
+    bits_rcv = (bits_sent if success else 0)
 
     ###
+    ###
+    # ============================================================
+    # Observed logical retransmission -> Ret_i(t)
+    # ============================================================
+    # EXACTAMENTE una muestra por paquete lógico:
+    #   0 -> no necesitó retransmisión
+    #   1 -> necesitó >= 1 retransmisión
+    # El motivo puede ser:
+    #   - DATA loss
+    #   - ACK loss
+    # ============================================================
+    if ea_enabled:
+        update_cross_layer_observation(
+            ea_ctx,
+            sender_id,
+            logical_packet_had_retry=(retransmissions > 0),
+        )
+    ###
+
     # ============================================================
     # Retry statistics
     # ============================================================
@@ -3073,10 +3176,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # Solo almacenamos observaciones reales.
     # ============================================================
     if ea_ctx is not None:
-        retry_stats = ea_ctx.setdefault(
-            "_retry_stats",
-            {}
-        )
+        retry_stats = ea_ctx.setdefault("_retry_stats", {})
 
         node_retry_stats = (
             retry_stats.setdefault(
@@ -3091,25 +3191,11 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             )
         )
 
-        node_retry_stats[
-            "logical_tx"
-        ] += 1
-
-        node_retry_stats[
-            "data_attempts"
-        ] += int(data_attempts)
-
-        node_retry_stats[
-            "retransmissions"
-        ] += int(retransmissions)
-
-        node_retry_stats[
-            "ack_attempts"
-        ] += int(ack_attempts)
-
-        node_retry_stats[
-            "ack_failures"
-        ] += int(ack_failures)
+        node_retry_stats["logical_tx"] += 1
+        node_retry_stats["data_attempts"] += int(data_attempts)
+        node_retry_stats["retransmissions"] += int(retransmissions)
+        node_retry_stats["ack_attempts"] += int(ack_attempts)
+        node_retry_stats["ack_failures"] += int(ack_failures)
     ###
 
     ####
@@ -3129,7 +3215,6 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     #       E_communication
     #       + E_base_processing
     #       + E_EA_processing
-    #
     # ============================================================
 
     # ============================================================
@@ -3141,28 +3226,17 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # contabilizado mediante update_energy_node_tdma().
     # ============================================================
 
-    sender_base_event_energy_mj = (
-        float(E_tx) * 1000.0
-    )
-
-    receiver_base_event_energy_mj = (
-        float(E_rx) * 1000.0
-    )
+    sender_base_event_energy_mj = (float(E_tx) * 1000.0)
+    receiver_base_event_energy_mj = (float(E_rx) * 1000.0)
 
     # ------------------------------------------------------------
     # EA incremental energy actually accounted during INITIAL event
     # ------------------------------------------------------------
-    ea_sender_incremental_mj = (
-        float(E_ea_sender) * 1000.0
-    )
-
-    ea_receiver_incremental_mj = (
-        float(E_ea_receiver) * 1000.0
-    )
+    ea_sender_incremental_mj = (float(E_ea_sender) * 1000.0)
+    ea_receiver_incremental_mj = (float(E_ea_receiver) * 1000.0)
 
     initial_ea_incremental_energy_mj = (
-        ea_sender_incremental_mj
-        + ea_receiver_incremental_mj
+        ea_sender_incremental_mj + ea_receiver_incremental_mj
     )
 
     # ============================================================
@@ -3177,8 +3251,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # Para el Sink no incluimos energía en el presupuesto UWSN.
     # ============================================================
     base_sender_proc_mj = (
-        energy_proc_j(t_enc_s)
-        * 1000.0
+        energy_proc_j(t_enc_s) * 1000.0
     )
 
     if (
@@ -3189,15 +3262,13 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         base_receiver_proc_mj = (
             energy_proc_j(
                 t_proc_rx_s
-            )
-            * 1000.0
+            ) * 1000.0
         )
     else:
         base_receiver_proc_mj = 0.0
 
     initial_base_processing_energy_mj = (
-        base_sender_proc_mj
-        + base_receiver_proc_mj
+        base_sender_proc_mj + base_receiver_proc_mj
     )
 
     # ============================================================
@@ -3214,15 +3285,13 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     retry_base_processing_energy_mj = (
         float(
             retry_base_processing_energy_j
-        )
-        * 1000.0
+        ) * 1000.0
     )
 
     retry_ea_incremental_energy_mj = (
         float(
             retry_ea_processing_energy_j
-        )
-        * 1000.0
+        ) * 1000.0
     )
 
     # ============================================================
@@ -3272,10 +3341,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ============================================================
     link_extra_energy_mj = (
         float(
-            retry_data_energy_j
-            + ack_energy_j
-        )
-        * 1000.0
+            retry_data_energy_j + ack_energy_j
+        ) * 1000.0
     )
 
     # ------------------------------------------------------------
@@ -3291,7 +3358,6 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
     # ------------------------------------------------------------
     retry_communication_energy_mj = max(
         0.0,
-
         link_extra_energy_mj
         - retry_processing_energy_mj
     )
@@ -3750,11 +3816,16 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
             latency_ms=total_latency_ms,
             # accepted delivery
             pdr=(1.0 if success else 0.0 ),
-            downgrade_injected=
-                ea_ctx["scenario"].downgrade_detected,
 
-            invalid_policy_meta=False,
-            invalid_tx_rejected=False,
+            ###
+            downgrade_injected=bool(
+                tx_ea.get("policy_tamper_injected", False,)
+                and
+                tx_ea.get("tampered_policy_field", "",) == "profile_id"
+            ),
+
+            invalid_policy_meta=bool(invalid_policy_meta_detected),
+            invalid_tx_rejected=bool(invalid_policy_meta_detected and not success),
         )
     ######################
     
