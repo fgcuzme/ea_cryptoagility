@@ -39,12 +39,23 @@ EA_SCENARIOS = [
     "SC5_DAG_CONGESTION",
 ]
 
-PER_BY_SCENARIO = {
-    "SC1_NORMAL": "None",
-    "SC2_LOW_ENERGY": "None",
-    "SC3_DEGRADED_CHANNEL": "0.25",
-    "SC4_HIGH_RISK": "None",
-    "SC5_DAG_CONGESTION": "None",
+# ============================================================
+# Controlled DATA-channel conditions by scenario
+# ============================================================
+# These values alter actual DATA delivery.
+# They are NOT passed to the EA policy engine.
+# EA-CryptoAgility observes their consequences through:
+#     PER_i(t)
+#     Ret_i(t)
+# obtained from real DATA/ACK outcomes.
+# ============================================================
+DATA_PER_OVERRIDE_BY_SCENARIO = {
+    "SC1_NORMAL": None,
+    "SC2_LOW_ENERGY": None,
+    # Controlled degraded DATA channel.
+    "SC3_DEGRADED_CHANNEL": 0.25,
+    "SC4_HIGH_RISK": None,
+    "SC5_DAG_CONGESTION": None,
 }
 
 # Modos de comparación
@@ -97,8 +108,52 @@ def run_batch(
 
                     # env["PER_VARIABLE"] = str(per)  # aquí defines la variable de entorno "None" or "0.15"
                     # env["PER_VARIABLE"] = PER_BY_SCENARIO.get(ea_scenario_id, "None")
-                    env["PER_VARIABLE"] = (os.environ.get("PER_VARIABLE","None"))
-                    env["UAN_ALLOW_PER_OVERRIDE"] = (os.environ.get("UAN_ALLOW_PER_OVERRIDE","0"))
+                    # env["PER_VARIABLE"] = (os.environ.get("PER_VARIABLE","None"))
+                    # env["UAN_ALLOW_PER_OVERRIDE"] = (os.environ.get("UAN_ALLOW_PER_OVERRIDE","0"))
+                    # ============================================================
+                    # Global PER override
+                    # ============================================================
+                    # Disabled during the scenario campaign so that SC3 modifies
+                    # DATA only and does not unintentionally degrade SYN/AUTH.
+                    # ============================================================
+                    env["PER_VARIABLE"] = "None"
+
+                    # ============================================================
+                    # DATA-specific PER experiment
+                    # ============================================================
+                    default_data_per = (DATA_PER_OVERRIDE_BY_SCENARIO.get(
+                            ea_scenario_id, None,)
+                    )
+
+                    # Manual override has priority over the scenario default.
+                    external_data_per = os.environ.get(
+                        "UAN_DATA_PER_OVERRIDE", None,)
+
+                    if external_data_per is not None:
+                        data_per_override = (external_data_per)
+                    elif default_data_per is None:
+                        data_per_override = "None"
+                    else:
+                        data_per_override = str(default_data_per)
+
+                    env["UAN_DATA_PER_OVERRIDE"] = (data_per_override)
+
+                    # Enable the controlled channel only when an override exists.
+                    env["UAN_ALLOW_PER_OVERRIDE"] = (
+                        "0"
+                        if str(data_per_override).strip().lower()
+                        in {
+                            "",
+                            "none",
+                            "null",
+                        }
+                        else "1"
+                    )
+
+                    # Sliding observation window used by PER_i, Ret_i and Inv_i.
+                    env["EA_OBSERVATION_WINDOW"] = (
+                        os.environ.get("EA_OBSERVATION_WINDOW", "20",)
+                    )
                     
                     # Diametro de la red
                     env["DIM_X"] = str(dim_x)

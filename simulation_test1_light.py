@@ -26,10 +26,7 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     MAX_DATA_RETRIES = int(os.environ.get("UAN_MAX_DATA_RETRIES","1",))
     SIM_DURATION_S = float(os.environ.get("SIM_DURATION_S","600",))
     if PER is None or str(PER).strip().lower() in {
-        "",
-        "none",
-        "null",
-    }:
+        "", "none", "null",}:
         PER_OVERRIDE = None
     else:
         PER_OVERRIDE = float(PER)
@@ -51,6 +48,49 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     output_dir = output_dir or f"stats/{RUN_ID}/"
     # os.makedirs("stats", exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
+
+    ## add
+    # ============================================================
+    # Controlled DATA-channel degradation experiment
+    # ============================================================
+    def _env_flag(
+        name: str,
+        default: str = "0",
+    ) -> bool:
+        return str(
+            os.environ.get(name, default)
+        ).strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    raw_data_per = os.environ.get("UAN_DATA_PER_OVERRIDE","None",)
+
+    if (
+        raw_data_per is None
+        or str(raw_data_per).strip().lower()
+        in {"", "none", "null"}
+    ):
+        DATA_PER_OVERRIDE = None
+    else:
+        DATA_PER_OVERRIDE = float(
+            raw_data_per
+        )
+
+    ALLOW_DATA_PER_OVERRIDE = _env_flag(
+        "UAN_ALLOW_PER_OVERRIDE",
+        "0",
+    )
+
+    EA_OBSERVATION_WINDOW = max(
+        1,
+        int(
+            os.environ.get("EA_OBSERVATION_WINDOW", "20",)
+        ),
+    )
+    ##
     
     ##
     # snapshots de energía por fase
@@ -75,13 +115,22 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
             "scenario": {
                 "num_nodes": NUM_NODES,
                 "freq_khz": 20, "bitrate_bps": 9200,
-                "traffic_shipping": float(SHIPPING), "wind_mps": float(WIND_SPEED),
+                "traffic_shipping": float(SHIPPING), 
+                "wind_mps": float(WIND_SPEED),
                 "spreading": float(SPREADING),
-                "E_init_J": float(ENERGY_INI), "threshold_bateria": float(0.10*float(ENERGY_INI)),
+                "E_init_J": float(ENERGY_INI), 
+                "threshold_bateria": float(0.10*float(ENERGY_INI)),
                 "per": str(PER),
+                "per_override": PER_OVERRIDE,
+                "data_channel": {
+                    "per_override_enabled": bool(ALLOW_DATA_PER_OVERRIDE),
+                    "per_override": DATA_PER_OVERRIDE,
+                    },
+                "cross_layer_observation": {
+                    "window_size": EA_OBSERVATION_WINDOW,
+                    },
                 # Colocar las variables globales
                 "arq": {"enabled": True,"ack_bits": 56,"max_data_retries": MAX_DATA_RETRIES},
-                "per_override": PER_OVERRIDE,
                 "sim_duration_s": SIM_DURATION_S,
                 # "ea_enabled": EA_ENABLED,
                 # "ea_scenario_id": EA_SCENARIO_ID,
@@ -92,7 +141,9 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
                 "scheme_id": SCHEME_ID,
                 "ea_scenario_id": EA_SCENARIO_ID,
                 "policy_id": "EA_POLICY_V1",
-                "profiles": ["S0", "S1", "S2", "S3", "S4"]
+                "profiles": ["S0", "S1", "S2", "S3", "S4"],
+                "policy_input_source":
+                "OBSERVED_CROSS_LAYER_STATE",
             },
             "start_time": datetime.datetime.utcnow().isoformat(),
             "code_version": "v1.0-main"
@@ -108,11 +159,18 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         "logger": EA_LOGGER,
         "run_id": RUN_ID,
         "seed": SEED,
-        # Solo para experimentos controlados de validación PHY/ARQ.
-        "allow_per_override": bool(
-            ALLOW_PER_OVERRIDE
-            and PER_OVERRIDE is not None
-        ),
+        # --------------------------------------------------------
+        # Cross-layer observation configuration
+        # --------------------------------------------------------
+        "observation_window": EA_OBSERVATION_WINDOW,
+        # --------------------------------------------------------
+        # DATA-channel controlled experiment
+        # --------------------------------------------------------
+        "allow_per_override": bool(ALLOW_DATA_PER_OVERRIDE),
+
+        "data_per_override": DATA_PER_OVERRIDE,
+        # DAG load must later come from an observed DAG metric.
+        "observed_dag_load": 0.0,
         }
 
     # %% PARAMETROS INICIALES DE SIMULACIÓN
@@ -221,12 +279,20 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
     print('-')
     ######
 
-    ### Escenario de ejemplo
-    ### forzar la baja energía para el escenario SC2
-    if EA_ENABLED and EA_SCENARIO_ID == "SC2_LOW_ENERGY":
+    # ============================================================
+    # SC2 low-energy environmental condition
+    # ============================================================
+     # The SAME initial energy condition must be applied to the
+    # Static U-Tangle baseline and EA-CryptoAgility.
+    # The scenario defines the environment; EA_ENABLED defines
+    # only whether the adaptive security mechanism is active.
+    # ============================================================
+    if EA_SCENARIO_ID == "SC2_LOW_ENERGY":
         for node in node_uw:
-            node["ResidualEnergy"] = node["E_init"] * EA_SCENARIO.residual_energy_ratio
-            node["Energy"] = node["ResidualEnergy"]
+            node["ResidualEnergy"] = (
+                node["E_init"] * EA_SCENARIO.residual_energy_ratio
+            )
+            node["Energy"] = (node["ResidualEnergy"])
 
     #%%
     print('-')

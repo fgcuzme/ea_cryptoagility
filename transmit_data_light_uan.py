@@ -1486,19 +1486,35 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
         bitrate=bitrate
     )
 
-    ## incluir también el procesamiento EA
+    # ============================================================
+    # DATA-specific controlled PER override
+    # ============================================================
+    # The override comes from EA_CTX rather than the global
+    # PER_VARIABLE so that a degraded DATA experiment does not
+    # automatically alter SYN/AUTH.
+    # This value is an experimental CHANNEL condition, not a
+    # policy-engine input. The policy engine observes its effects
+    # through actual DATA losses and retransmissions.
+    # ============================================================
+
     allow_per_override = bool(
-    ea_ctx is not None
-    and ea_ctx.get(
-        "allow_per_override",
-        False
+        ea_ctx is not None
+        and ea_ctx.get("allow_per_override", False,)
     )
+
+    data_per_override = (
+        ea_ctx.get("data_per_override", None,)
+        if ea_ctx is not None
+        else None
     )
 
     effective_per_override = (
-    PER_VARIABLE
-    if allow_per_override
-    else None
+        float(data_per_override)
+        if (
+            allow_per_override
+            and data_per_override is not None
+        )
+        else None
     )
 
     # ============================================================
