@@ -22,17 +22,11 @@ DEFAULT_POLICY_KEY = b"EA-CryptoAgility-U-Tangle-policy-key-v1"
 # Cross-layer observation tracking
 # ============================================================
 DEFAULT_OBSERVATION_WINDOW = int(
-    os.environ.get(
-        "EA_OBSERVATION_WINDOW",
-        "20",
-    )
+    os.environ.get("EA_OBSERVATION_WINDOW","20",)
 )
 
 def _clip01(value: float) -> float:
-    return max(
-        0.0,
-        min(1.0, float(value)),
-    )
+    return max(0.0, min(1.0, float(value)),)
 
 def _get_observation_store(
     ea_ctx: Dict[str, Any],
@@ -42,10 +36,7 @@ def _get_observation_store(
     No se utilizan globals para evitar contaminación entre
     ejecuciones independientes.
     """
-    return ea_ctx.setdefault(
-        "_observation_state",
-        {},
-    )
+    return ea_ctx.setdefault("_observation_state", {},)
 
 def _get_node_observation(
     ea_ctx: Dict[str, Any],
@@ -68,20 +59,17 @@ def _get_node_observation(
             # Resultado de cada intento DATA:
             # 0 = recibido
             # 1 = perdido
-            "data_losses":
-                deque(maxlen=window),
+            "data_losses": deque(maxlen=window),
 
             # Una entrada por paquete lógico:
             # 0 = no necesitó retry
             # 1 = necesitó >= 1 retry
-            "logical_retries":
-                deque(maxlen=window),
+            "logical_retries": deque(maxlen=window),
 
             # Resultado de verificaciones:
             # 0 = válida
             # 1 = inválida
-            "invalid_verifications":
-                deque(maxlen=window),
+            "invalid_verifications": deque(maxlen=window),
 
             # Evidencias de seguridad recientes
             "downgrade_detected": False,
@@ -104,19 +92,16 @@ def update_cross_layer_observation(
     data_success: Optional[bool] = None,
     logical_packet_had_retry: Optional[bool] = None,
     verification_valid: Optional[bool] = None,
-    downgrade_detected: bool = None,
-    replay_detected: bool = None,
-    suspicious_identity: bool = None,
+    downgrade_detected: Optional[bool] = None,
+    replay_detected: Optional[bool] = None,
+    suspicious_identity: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """
     Actualiza únicamente observaciones que YA ocurrieron.
     Esta función no selecciona políticas y no utiliza valores
     sintéticos de SC1-SC5.
     """
-    obs = _get_node_observation(
-        ea_ctx,
-        node_id,
-    )
+    obs = _get_node_observation(ea_ctx, node_id,)
 
     if data_success is not None:
         obs["data_losses"].append(
@@ -153,6 +138,49 @@ def update_cross_layer_observation(
     return obs
 ###
 
+### new
+# ============================================================
+# Policy hysteresis / cooldown memory
+# ============================================================
+
+def _get_policy_memory_store(
+    ea_ctx: Dict[str, Any],
+) -> Dict[int, Dict[str, Any]]:
+    """
+    Memoria de política LOCAL al run.
+    Mantiene, por nodo:
+        - último perfil seleccionado;
+        - racha de decisiones limpias para salida de S3.
+    Se almacena dentro de ea_ctx para evitar contaminación
+    entre ejecuciones independientes.
+    """
+    return ea_ctx.setdefault(
+        "_policy_memory",
+        {},
+    )
+
+def _get_node_policy_memory(
+    ea_ctx: Dict[str, Any],
+    node_id: int,
+) -> Dict[str, Any]:
+    """
+    Obtiene/inicializa la memoria de política de un nodo.
+    """
+    store = _get_policy_memory_store(
+        ea_ctx
+    )
+
+    node_id = int(node_id)
+
+    if node_id not in store:
+        store[node_id] = {
+            "previous_profile": ProfileID.S1.value,
+            "s3_clean_streak": 0,
+        }
+
+    return store[node_id]
+###
+
 ### función de observación get
 def get_cross_layer_observation(
     ea_ctx: Dict[str, Any],
@@ -167,10 +195,7 @@ def get_cross_layer_observation(
     Si todavía no existe historial DATA, se utiliza únicamente
     el PER físico instantáneo como condición inicial.
     """
-    obs = _get_node_observation(
-        ea_ctx,
-        node_id,
-    )
+    obs = _get_node_observation(ea_ctx, node_id,)
 
     losses = obs["data_losses"]
 
@@ -209,10 +234,7 @@ def get_cross_layer_observation(
             bool(obs["suspicious_identity"]),
         "observation_window":
             int(
-                ea_ctx.get(
-                    "observation_window",
-                    DEFAULT_OBSERVATION_WINDOW,
-                )
+                ea_ctx.get("observation_window", DEFAULT_OBSERVATION_WINDOW,)
             ),
 
         "data_window_samples": len(losses),
@@ -224,8 +246,7 @@ def get_cross_layer_observation(
 def infer_message_type(tx: Dict[str, Any]) -> MessageType:
     """
     Infer message type from a UWSNsecure transaction dictionary.
-
-    You can customize this mapping according to your Tx fields.
+   You can customize this mapping according to your Tx fields.
     """
     raw = (
         tx.get("message_type")
@@ -404,6 +425,15 @@ def apply_incremental_processing_energy(
         node["ResidualEnergy"]
     )
 
+###
+# --------------------------------------------------------
+# Policy memory defaults
+# --------------------------------------------------------
+previous_profile = (ProfileID.S1.value)
+s3_clean_streak = 0
+
+
+###
 
 def build_state_from_uwsnsecure(
     node: Dict[str, Any],
@@ -444,6 +474,22 @@ def build_state_from_uwsnsecure(
         downgrade_detected = (observed["downgrade_detected"])
         replay_detected = (observed["replay_detected"])
         suspicious_identity = (observed["suspicious_identity"])
+
+        ### add
+        policy_memory = (
+            _get_node_policy_memory(ea_ctx, node_id,)
+        )
+        previous_profile = str(
+            policy_memory.get("previous_profile", ProfileID.S1.value,)
+        )
+
+        s3_clean_streak = max(
+            0,
+            int(
+                policy_memory.get("s3_clean_streak",0,)
+            ),
+        )
+        ###
     ###
 
     return CrossLayerState(
@@ -463,6 +509,9 @@ def build_state_from_uwsnsecure(
         suspicious_identity=bool(suspicious_identity),
         role=str(node.get("Role", "SN")),
         neighbor_id=neighbor_id,
+        ## add policy memory
+        previous_profile=previous_profile,
+        s3_clean_streak=s3_clean_streak,
     )
 
 
@@ -505,6 +554,17 @@ def attach_policy_to_transaction(
         neighbor_id=neighbor_id,
     )
     policy = select_policy(state, thresholds)
+
+    ## add
+    # ========================================================
+    # Persist policy hysteresis/cooldown state
+    # ========================================================
+    if ea_ctx is not None:
+        policy_memory = (_get_node_policy_memory(ea_ctx, state.node_id,))
+        policy_memory["previous_profile"] = policy.profile_id.value
+        policy_memory["s3_clean_streak"] = int(state.s3_clean_streak)
+    ##
+
     meta = build_policy_metadata(policy, state, epoch=epoch, key=key)
 
     tx["Policy"] = policy.as_dict()
@@ -592,6 +652,8 @@ def verify_transaction_policy(
         role=str(state_dict.get("role",node.get("Role", "SN"))),
         neighbor_id=state_dict.get("neighbor_id"),
         attack_label=str(state_dict.get("attack_label","NONE")),
+        previous_profile=str(state_dict.get("previous_profile", ProfileID.S1.value,)),
+        s3_clean_streak=max(0, int(state_dict.get("s3_clean_streak", 0,)),),
     )
     expected_policy = select_policy(state, thresholds)
 
