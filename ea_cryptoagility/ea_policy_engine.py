@@ -326,48 +326,21 @@ def select_policy(
     # ========================================================
     # 7. S3 hysteresis / cooldown
     # ========================================================
-    clean_for_s3_exit = is_s3_exit_clean(
-        state,
-        thresholds,
-        security_risk=SR_i,
+
+    next_s3_clean_streak = (
+        compute_next_s3_clean_streak(
+            state,
+            thresholds,
+            security_risk=SR_i,
+        )
     )
 
-    s3_clean_streak = max(0, int(getattr(state, "s3_clean_streak", 0,)),)
-
-    # --------------------------------------------------------
-    # Update cooldown state using CURRENT observation.
-    # New attack evidence:
-    #     reset clean streak.
-    # Previous profile S3 + clean observation:
-    #     accumulate one clean decision.
-    # Previous profile S3 + non-clean observation:
-    #     restart cooldown.
-    # Outside S3:
-    #     no recovery streak is needed.
-    # --------------------------------------------------------
-
-    if high_risk_now:
-        s3_clean_streak = 0
-    elif (
-        previous_profile == ProfileID.S3.value
-    ):
-        if clean_for_s3_exit:
-            s3_clean_streak += 1
-        else:
-            s3_clean_streak = 0
-    else:
-        s3_clean_streak = 0
-
-    # Store the updated value in the current state so
-    # integration_hooks can persist it after selection.
-    state.s3_clean_streak = (s3_clean_streak)
-
-    # Keep S3 active until K consecutive clean decisions
-    # have been observed.
     s3_cooldown_active = (
-        previous_profile == ProfileID.S3.value
+        previous_profile
+        == ProfileID.S3.value
         and
-        s3_clean_streak < thresholds.S3_COOLDOWN_DECISIONS
+        next_s3_clean_streak
+        < thresholds.S3_COOLDOWN_DECISIONS
     )
 
     # ========================================================
