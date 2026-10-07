@@ -649,15 +649,15 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
         ## Se agrega esta parte
         if EA_CTX["enabled"]:
             txgenesis = _ea_apply_policy_to_auth_tx(
-            tx=txgenesis,
-            sender_node=node_sink,
-            ea_ctx=EA_CTX,
-            epoch=i + 1,
-            per_i=EA_SCENARIO.per,
-            ret_i=EA_SCENARIO.retransmission_rate,
-            dag_load_i=EA_SCENARIO.dag_load,
-            security_risk_i=EA_SCENARIO.security_risk,
-            message_type="JOIN",
+                tx=txgenesis,
+                sender_node=node_sink,
+                ea_ctx=EA_CTX,
+                epoch=i + 1,
+                # per_i=EA_SCENARIO.per,
+                # ret_i=EA_SCENARIO.retransmission_rate,
+                # dag_load_i=EA_SCENARIO.dag_load,
+                # security_risk_i=EA_SCENARIO.security_risk,
+                message_type="JOIN",
             )
 
         # Se comenta 08/10/2025

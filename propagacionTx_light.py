@@ -48,58 +48,108 @@ def proc_time_ms(fixed_ms: float = 20.0) -> float:
 ####
 
 ### agregar helper
+# def _ea_apply_policy_to_auth_tx(
+#     tx,
+#     sender_node,
+#     ea_ctx,
+#     epoch,
+#     # per_i,
+#     # ret_i=0.0,
+#     # dag_load_i=0.0,
+#     # security_risk_i=0.0,
+#     message_type="JOIN",
+#     neighbor_id=None,
+# ):
+#     if ea_ctx is None or not ea_ctx.get("enabled", False):
+#         return tx
+
+#     scenario = ea_ctx["scenario"]
+
+#     tx.setdefault("message_type", message_type)
+
+#     tx = attach_policy_to_transaction(
+#         tx=tx,
+#         node=sender_node,
+#         epoch=epoch,
+#         key=ea_ctx["policy_key"],
+#         per=per_i,
+#         retransmission_rate=ret_i,
+#         dag_load=dag_load_i,
+#         security_risk=security_risk_i,
+#         invalid_signature_rate=scenario.invalid_signature_rate,
+#         downgrade_detected=scenario.downgrade_detected,
+#         replay_detected=scenario.replay_detected,
+#         suspicious_identity=scenario.suspicious_identity,
+#     )
+
+#     # Important:
+#     # For U-Tangle authentication/control packets, avoid double-counting
+#     # Ed25519 signature and checkpoint bytes. The baseline AUTH packet already
+#     # contains the core signed transaction fields.
+#     tx = _ea_apply_auth_packet_size_model(
+#         tx=tx,
+#         message_type=message_type,
+#         bitrate_bps=9200.0,
+#         p_tx_w=2.0,
+#         p_rx_w=0.75,
+#     )
+
+#     # IRR experiment: controlled policy_meta tampering before DAG ingestion.
+#     tx = maybe_tamper_policy_metadata(
+#     tx=tx,
+#     ea_ctx=ea_ctx,
+#     )
+
+#     return tx
+
+## actualizo el helper anterior
 def _ea_apply_policy_to_auth_tx(
     tx,
     sender_node,
     ea_ctx,
     epoch,
-    per_i,
-    ret_i=0.0,
-    dag_load_i=0.0,
-    security_risk_i=0.0,
     message_type="JOIN",
+    neighbor_id=None,
 ):
-    if ea_ctx is None or not ea_ctx.get("enabled", False):
+    """
+    Attach EA policy to an AUTH/control transaction.
+    Policy selection uses only the cross-layer observation
+    history stored in ea_ctx.
+    Scenario-level synthetic risk/PER/retransmission values
+    are never injected directly into the policy engine.
+    """
+    if (ea_ctx is None or not ea_ctx.get("enabled", False)):
         return tx
 
-    scenario = ea_ctx["scenario"]
-
-    tx.setdefault("message_type", message_type)
+    tx.setdefault("message_type", message_type,)
 
     tx = attach_policy_to_transaction(
         tx=tx,
         node=sender_node,
         epoch=epoch,
         key=ea_ctx["policy_key"],
-        per=per_i,
-        retransmission_rate=ret_i,
-        dag_load=dag_load_i,
-        security_risk=security_risk_i,
-        invalid_signature_rate=scenario.invalid_signature_rate,
-        downgrade_detected=scenario.downgrade_detected,
-        replay_detected=scenario.replay_detected,
-        suspicious_identity=scenario.suspicious_identity,
+        # Initial fallback only.
+        # If observations exist, integration_hooks replaces
+        # these values with the observed window.
+        per=0.0,
+        dag_load=float(ea_ctx.get("observed_dag_load", 0.0,)),
+        # Enables observation_state + policy_memory.
+        ea_ctx=ea_ctx,
+        neighbor_id=neighbor_id,
     )
 
-    # Important:
-    # For U-Tangle authentication/control packets, avoid double-counting
-    # Ed25519 signature and checkpoint bytes. The baseline AUTH packet already
-    # contains the core signed transaction fields.
     tx = _ea_apply_auth_packet_size_model(
         tx=tx,
         message_type=message_type,
-        bitrate_bps=9200.0,
-        p_tx_w=2.0,
-        p_rx_w=0.75,
     )
 
-    # IRR experiment: controlled policy_meta tampering before DAG ingestion.
     tx = maybe_tamper_policy_metadata(
-    tx=tx,
-    ea_ctx=ea_ctx,
+        tx=tx,
+        ea_ctx=ea_ctx,
     )
 
     return tx
+##
 
 def _ea_apply_auth_packet_size_model(
     tx,
@@ -296,11 +346,12 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                         sender_node=sink1,
                         ea_ctx=ea_ctx,
                         epoch=ronda + 1,
-                        per_i=scenario.per,
-                        ret_i=scenario.retransmission_rate,
-                        dag_load_i=scenario.dag_load,
-                        security_risk_i=scenario.security_risk,
+                        # per_i=scenario.per,
+                        # ret_i=scenario.retransmission_rate,
+                        # dag_load_i=scenario.dag_load,
+                        # security_risk_i=scenario.security_risk,
                         message_type="JOIN",
+                        neighbor_id=Ch_node['NodeID'],
                     )
                     packet_size_auth_bits = int(genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
                 else:
@@ -585,11 +636,12 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                         sender_node=ch_node1,
                         ea_ctx=ea_ctx,
                         epoch=ronda + 1,
-                        per_i=scenario.per,
-                        ret_i=scenario.retransmission_rate,
-                        dag_load_i=scenario.dag_load,
-                        security_risk_i=scenario.security_risk,
+                        # per_i=scenario.per,
+                        # ret_i=scenario.retransmission_rate,
+                        # dag_load_i=scenario.dag_load,
+                        # security_risk_i=scenario.security_risk,
                         message_type="JOIN",
+                        neighbor_id=node1['NodeID'],
                     )
                     packet_size_auth_bits = int(genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
                 else:
@@ -914,11 +966,12 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                     sender_node=ch_node1,
                     ea_ctx=ea_ctx,
                     epoch=ronda + 1,
-                    per_i=scenario.per,
-                    ret_i=scenario.retransmission_rate,
-                    dag_load_i=scenario.dag_load,
-                    security_risk_i=scenario.security_risk,
+                    # per_i=scenario.per,
+                    # ret_i=scenario.retransmission_rate,
+                    # dag_load_i=scenario.dag_load,
+                    # security_risk_i=scenario.security_risk,
                     message_type="KEY_UPDATE",
+                    neighbor_id=sink1['NodeID'],
                 )
                 packet_size_auth_bits = int(response_genesis_tx["ea_cost"]["tx_size_bytes"] * 8)
             else:
@@ -1166,11 +1219,12 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                             sender_node=ch_node1,
                             ea_ctx=ea_ctx,
                             epoch=ronda + 1,
-                            per_i=scenario.per,
-                            ret_i=scenario.retransmission_rate,
-                            dag_load_i=scenario.dag_load,
-                            security_risk_i=scenario.security_risk,
+                            # per_i=scenario.per,
+                            # ret_i=scenario.retransmission_rate,
+                            # dag_load_i=scenario.dag_load,
+                            # security_risk_i=scenario.security_risk,
                             message_type="KEY_UPDATE",
+                            neighbor_id=node2['NodeID'],
                         )
                         packet_size_auth_bits = int(response_genesis_tx1["ea_cost"]["tx_size_bytes"] * 8)
                     else:
@@ -1502,11 +1556,12 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                         sender_node=node4,
                         ea_ctx=ea_ctx,
                         epoch=ronda + 1,
-                        per_i=scenario.per,
-                        ret_i=scenario.retransmission_rate,
-                        dag_load_i=scenario.dag_load,
-                        security_risk_i=scenario.security_risk,
+                        # per_i=scenario.per,
+                        # ret_i=scenario.retransmission_rate,
+                        # dag_load_i=scenario.dag_load,
+                        # security_risk_i=scenario.security_risk,
                         message_type="JOIN",
+                        neighbor_id=node_ch['NodeID'],
                     )
                     packet_size_auth_bits = int(response_sn_tx["ea_cost"]["tx_size_bytes"] * 8)
                 else:
