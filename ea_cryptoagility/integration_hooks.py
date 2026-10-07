@@ -455,7 +455,7 @@ def build_state_from_uwsnsecure(
     # --------------------------------------------------------
     previous_profile = (ProfileID.S1.value)
     s3_clean_streak = 0
-    
+
     ###
     observed = None
 
@@ -574,7 +574,13 @@ def attach_policy_to_transaction(
     if ea_ctx is not None:
         policy_memory = (_get_node_policy_memory(ea_ctx, state.node_id,))
         policy_memory["previous_profile"] = policy.profile_id.value
-        policy_memory["s3_clean_streak"] = int(next_s3_clean_streak)
+        # El streak solo tiene significado mientras el nodo
+        # permanece en S3. Al abandonar S3 se reinicia.
+        policy_memory["s3_clean_streak"] = (
+            int(next_s3_clean_streak)
+            if policy.profile_id == ProfileID.S3
+            else 0
+        )
     ##
 
     meta = build_policy_metadata(policy, state, epoch=epoch, key=key)
