@@ -18,7 +18,7 @@ from ea_cryptoagility.integration_hooks import (
     maybe_tamper_policy_metadata,
 )
 
-from ea_cryptoagility.ea_crypto_costs import estimate_modem_energy_mj
+# from ea_cryptoagility.ea_crypto_costs import estimate_modem_energy_mj
 
 global VERBOSE
 
@@ -190,26 +190,47 @@ def _ea_apply_auth_packet_size_model(
     ea_cost["auth_size_model"] = "UTANGLE_BASE_PLUS_POLICY_META"
     ea_cost["tx_size_bytes"] = int(auth_size_bytes)
 
-    # Recompute simplified modem-energy estimate for consistency in EA logs.
-    modem = estimate_modem_energy_mj(
-        tx_size_bytes=auth_size_bytes,
-        bitrate_bps=bitrate_bps,
-        p_tx_w=p_tx_w,
-        p_rx_w=p_rx_w,
-        rx_count=1,
-        retransmissions=0,
-    )
+    # # Recompute simplified modem-energy estimate for consistency in EA logs.
+    # modem = estimate_modem_energy_mj(
+    #     tx_size_bytes=auth_size_bytes,
+    #     bitrate_bps=bitrate_bps,
+    #     p_tx_w=p_tx_w,
+    #     p_rx_w=p_rx_w,
+    #     rx_count=1,
+    #     retransmissions=0,
+    # )
 
-    ea_cost.update(modem)
+    # ea_cost.update(modem)
 
-    crypto_energy_mj = float(ea_cost.get("crypto_energy_mj", 0.0))
-    ea_cost["total_energy_mj"] = crypto_energy_mj + float(
-        ea_cost.get("modem_energy_mj", 0.0)
-    )
+    # crypto_energy_mj = float(ea_cost.get("crypto_energy_mj", 0.0))
+    # ea_cost["total_energy_mj"] = crypto_energy_mj + float(
+    #     ea_cost.get("modem_energy_mj", 0.0)
+    # )
+
+    # tx["ea_cost"] = ea_cost
+
+    # return tx
+
+    ## add
+    # ============================================================
+    # R1 energy-accounting rule
+    # ============================================================
+    # This helper defines ONLY the AUTH transaction size.
+    # Acoustic TX/RX/retransmission energy must NOT be estimated
+    # here using a second fixed-power modem model.
+    # The real communication energy is measured later by:
+    #     energia_dinamica.py
+    # from the actual TX/RX event and residual-energy deltas.
+    # Therefore energy accounting remains unfinished at this point.
+    # ============================================================
+    ea_cost["energy_scope"] = "NOT_FINALIZED"
+
+    ea_cost["communication_energy_source"] = ("energia_dinamica.py")
 
     tx["ea_cost"] = ea_cost
 
     return tx
+    ##
 
 # import pickle
 
