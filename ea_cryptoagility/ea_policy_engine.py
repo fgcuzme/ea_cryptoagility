@@ -176,6 +176,57 @@ def is_s3_exit_clean(
     )
 ##
 
+## add
+def compute_next_s3_clean_streak(
+    state: CrossLayerState,
+    thresholds: Thresholds = Thresholds(),
+    security_risk: Optional[float] = None,
+) -> int:
+    """
+    Computes the S3 recovery memory for the NEXT decision.
+    IMPORTANT:
+    This function does not mutate state. Therefore the state
+    serialized in ea_state continues representing the inputs
+    used to select the current policy.
+    """
+    sr = (
+        compute_state_security_risk(state, thresholds,)
+        if security_risk is None
+        else float(security_risk)
+    )
+
+    high_risk_now = (
+        state.downgrade_detected
+        or state.replay_detected
+        or state.suspicious_identity
+        or state.invalid_signature_rate >= thresholds.INV_HIGH
+        or sr >= thresholds.SR_HIGH
+    )
+
+    current_streak = max(0,int(getattr(state,"s3_clean_streak",0,)),)
+
+    previous_profile = str(getattr(state, "previous_profile", ProfileID.S1.value,))
+
+    if previous_profile.startswith("ProfileID."):
+        previous_profile = (previous_profile.split(".")[-1])
+
+    if high_risk_now:
+        return 0
+
+    if (previous_profile== ProfileID.S3.value):
+        clean = is_s3_exit_clean(
+            state,
+            thresholds,
+            security_risk=sr,
+        )
+
+        if clean:
+            return (current_streak + 1)
+        return 0
+
+    return 0
+##
+
 ## function new 
 def select_policy(
     state: CrossLayerState,

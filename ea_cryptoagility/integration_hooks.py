@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 # from .ea_crypto_costs import estimate_total_transaction_cost, operation_counts_for_policy
 from .ea_logger import EAEventLogger
-from .ea_policy_engine import compute_energy_pressure, select_policy
+from .ea_policy_engine import (compute_energy_pressure, compute_next_s3_clean_streak, select_policy,)
 from .ea_policy_metadata import build_policy_metadata, verify_policy_metadata
 # from .ea_types import CrossLayerState, MessageType, PolicyTuple, Thresholds
 
@@ -426,11 +426,6 @@ def apply_incremental_processing_energy(
     )
 
 ###
-# --------------------------------------------------------
-# Policy memory defaults
-# --------------------------------------------------------
-previous_profile = (ProfileID.S1.value)
-s3_clean_streak = 0
 
 
 ###
@@ -454,6 +449,13 @@ def build_state_from_uwsnsecure(
     residual, initial = node_energy(node)
     node_id = int(node.get("NodeID", node.get("node_id", -1)))
 
+    ###
+    # --------------------------------------------------------
+    # Policy memory defaults
+    # --------------------------------------------------------
+    previous_profile = (ProfileID.S1.value)
+    s3_clean_streak = 0
+    
     ###
     observed = None
 
@@ -555,6 +557,16 @@ def attach_policy_to_transaction(
     )
     policy = select_policy(state, thresholds)
 
+    ###
+    next_s3_clean_streak = (
+        compute_next_s3_clean_streak(
+            state,
+            thresholds,
+            security_risk=state.security_risk,
+        )
+    )
+    ###
+
     ## add
     # ========================================================
     # Persist policy hysteresis/cooldown state
@@ -562,7 +574,7 @@ def attach_policy_to_transaction(
     if ea_ctx is not None:
         policy_memory = (_get_node_policy_memory(ea_ctx, state.node_id,))
         policy_memory["previous_profile"] = policy.profile_id.value
-        policy_memory["s3_clean_streak"] = int(state.s3_clean_streak)
+        policy_memory["s3_clean_streak"] = int(next_s3_clean_streak)
     ##
 
     meta = build_policy_metadata(policy, state, epoch=epoch, key=key)
