@@ -2765,7 +2765,7 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                     )
 
                     ###
-                    if downgrade_observed:
+                    if retry_downgrade_observed:
                         update_cross_layer_observation(
                             ea_ctx,
                             receiver_id,

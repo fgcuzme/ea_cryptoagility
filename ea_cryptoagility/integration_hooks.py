@@ -771,7 +771,6 @@ def maybe_tamper_policy_metadata(
 ) -> Dict[str, Any]:
     """
     Injects controlled policy_meta tampering for IRR evaluation.
-
     This function must be called after attach_policy_to_transaction()
     and before ingest_tx(). It modifies policy_meta after policy_mac has
     been computed, so verify_transaction_policy() should reject the tx.

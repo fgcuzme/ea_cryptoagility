@@ -722,7 +722,7 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
                         tx=tx,
                         latency_ms=0.0,
                         pdr=0.0,
-                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                        downgrade_injected=False,
                         invalid_policy_meta=True,
                         invalid_tx_rejected=True,
                     )

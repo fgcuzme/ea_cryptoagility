@@ -36,6 +36,73 @@ def risk_level(security_risk: float) -> str:
         return "R_MED"
     return "R_LOW"
 
+### add
+def _q6(value: float) -> float:
+    """
+    Canonical numeric quantization used by the policy-state
+    cryptographic binding.
+    Six decimal digits are sufficient for the normalized
+    cross-layer variables while avoiding representation noise.
+    """
+    return round(float(value), 6)
+
+
+def canonical_state_binding(
+    state: CrossLayerState,
+) -> Dict[str, Any]:
+    """
+    Policy-relevant cross-layer state authenticated by policy_mac.
+    Only variables that can affect policy selection or its
+    hysteresis/cooldown memory are included.
+    """
+    return {
+        # ----------------------------------------------------
+        # Energy state
+        # ----------------------------------------------------
+        "residual_energy_j": _q6(state.residual_energy_j),
+
+        "initial_energy_j": _q6(state.initial_energy_j),
+
+        "energy_pressure":
+            _q6(
+                compute_energy_pressure(
+                    state.residual_energy_j,
+                    state.initial_energy_j,
+                )
+            ),
+
+        # ----------------------------------------------------
+        # Observed cross-layer metrics
+        # ----------------------------------------------------
+        "per": _q6(state.per),
+        "retransmission_rate": _q6( state.retransmission_rate),
+        "dag_load": _q6(state.dag_load),
+        "invalid_signature_rate": _q6(state.invalid_signature_rate),
+
+        # ----------------------------------------------------
+        # Explicit security evidence
+        # ----------------------------------------------------
+        "downgrade_detected": bool(state.downgrade_detected),
+        "replay_detected":bool(state.replay_detected),
+        "suspicious_identity":bool(state.suspicious_identity),
+
+        # ----------------------------------------------------
+        # Stateful hysteresis/cooldown
+        # ----------------------------------------------------
+        "previous_profile":str(state.previous_profile),
+        "s3_clean_streak":int(state.s3_clean_streak),
+
+        # ----------------------------------------------------
+        # Link context
+        # ----------------------------------------------------
+        "neighbor_id": (
+            None
+            if state.neighbor_id is None
+            else int(state.neighbor_id)
+        ),
+    }
+###
+
 
 def canonical_policy_payload(
     policy: PolicyTuple,
@@ -61,7 +128,10 @@ def canonical_policy_payload(
         "epoch": int(epoch),
         "node_id": int(state.node_id),
         "message_type": state.message_type.value,
-    }
+        ### new
+        "state_binding_version": "CLSTATE_V1",
+        "state_binding": canonical_state_binding(state),
+        }
     if extra:
         payload.update(extra)
     return payload

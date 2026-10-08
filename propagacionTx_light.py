@@ -476,9 +476,19 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
                                     tx=genesis_tx,
                                     latency_ms=lat_prop + lat_tx + lat_proc,
                                     pdr=1.0 if success_auth else 0.0,
-                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                                    invalid_policy_meta=False,
-                                    invalid_tx_rejected=False,
+                                    downgrade_injected=bool(
+                                        ea_ctx.get("policy_tamper_injected", False,)
+                                        and
+                                        ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                                    ),
+
+                                    invalid_policy_meta=bool(
+                                        ea_ctx.get("invalid_policy_meta", False,)
+                                    ),
+
+                                    invalid_tx_rejected=bool(
+                                        ea_ctx.get("invalid_tx_rejected", False,)
+                                    ),
                                 )
 
                             if success_auth_ack:
@@ -789,9 +799,19 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                                     tx=genesis_tx,
                                     latency_ms=lat_prop + lat_tx + lat_proc,
                                     pdr=1.0 if success_auth else 0.0,
-                                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                                    invalid_policy_meta=False,
-                                    invalid_tx_rejected=False,
+                                    downgrade_injected=bool(
+                                        ea_ctx.get("policy_tamper_injected", False,)
+                                        and
+                                        ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                                    ),
+
+                                    invalid_policy_meta=bool(
+                                        ea_ctx.get("invalid_policy_meta", False,)
+                                    ),
+
+                                    invalid_tx_rejected=bool(
+                                        ea_ctx.get("invalid_tx_rejected", False,)
+                                    ),
                                 )
 
                             # Se actualiza la energia de los demas nodos
@@ -1034,9 +1054,19 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                     tx=auth_response_tx1,
                     latency_ms=lat_prop + lat_tx + (t_proc_ch_resp_auth*1000.0),
                     pdr=1.0 if success_resp_auth else 0.0,
-                    downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                    invalid_policy_meta=False,
-                    invalid_tx_rejected=False,
+                    downgrade_injected=bool(
+                        ea_ctx.get("policy_tamper_injected", False,)
+                        and
+                        ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                    ),
+
+                    invalid_policy_meta=bool(
+                        ea_ctx.get("invalid_policy_meta", False,)
+                    ),
+
+                    invalid_tx_rejected=bool(
+                        ea_ctx.get("invalid_tx_rejected", False,)
+                    ),
                 )
 
             ## Energia de los demas nodos
@@ -1386,9 +1416,19 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                                         tx=auth_response_tx1,
                                         latency_ms=lat_prop + lat_tx + lat_proc,
                                         pdr=1.0 if success_resp_ack else 0.0,
-                                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                                        invalid_policy_meta=False,
-                                        invalid_tx_rejected=False,
+                                        downgrade_injected=bool(
+                                            ea_ctx.get("policy_tamper_injected", False,)
+                                            and
+                                            ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                                        ),
+
+                                        invalid_policy_meta=bool(
+                                            ea_ctx.get("invalid_policy_meta", False,)
+                                        ),
+
+                                        invalid_tx_rejected=bool(
+                                            ea_ctx.get("invalid_tx_rejected", False,)
+                                        ),
                                     )
 
                                 if success_resp_ack:
@@ -1626,9 +1666,19 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                         tx=node_auth_tx,
                         latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
                         pdr=1.0 if success_resp_auth else 0.0,
-                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                        invalid_policy_meta=False,
-                        invalid_tx_rejected=False,
+                        downgrade_injected=bool(
+                            ea_ctx.get("policy_tamper_injected", False,)
+                            and
+                            ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                        ),
+
+                        invalid_policy_meta=bool(
+                            ea_ctx.get("invalid_policy_meta", False,)
+                        ),
+
+                        invalid_tx_rejected=bool(
+                            ea_ctx.get("invalid_tx_rejected", False,)
+                        ),
                     )
 
                 ## Energia de los demas nodos
@@ -1759,9 +1809,19 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                                         tx=node_auth_tx,
                                         latency_ms=lat_prop + lat_tx + (t_proc_sn_resp_auth * 1000.0),
                                         pdr=1.0 if success_resp_auth else 0.0,
-                                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
-                                        invalid_policy_meta=False,
-                                        invalid_tx_rejected=False,
+                                        downgrade_injected=bool(
+                                            ea_ctx.get("policy_tamper_injected", False,)
+                                            and
+                                            ea_ctx.get("tampered_policy_field", "",) == "profile_id"
+                                        ),
+
+                                        invalid_policy_meta=bool(
+                                            ea_ctx.get("invalid_policy_meta", False,)
+                                        ),
+
+                                        invalid_tx_rejected=bool(
+                                            ea_ctx.get("invalid_tx_rejected", False,)
+                                        ),
                                     )
 
                                 ## Energia de los demas nodos
