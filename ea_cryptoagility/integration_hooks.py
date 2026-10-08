@@ -895,6 +895,11 @@ def log_ea_transaction(
         "snr_db": state.get("snr_db", ""),
         "retransmission_rate": state.get("retransmission_rate", ""),
         "dag_load": state.get("dag_load", ""),
+        ###
+        "invalid_signature_rate": state.get("invalid_signature_rate", "",),
+        "previous_profile": state.get( "previous_profile", "",),
+        "s3_clean_streak": state.get("s3_clean_streak", "",),
+        ###
         "risk_level": meta.get("risk_level", ""),
         "energy_bucket": meta.get("energy_bucket", ""),
         "tx_size_bytes": cost.get("tx_size_bytes", ""),

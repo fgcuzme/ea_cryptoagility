@@ -24,6 +24,11 @@ EA_LOG_FIELDS = [
     "snr_db",
     "retransmission_rate",
     "dag_load",
+    ### new
+    "invalid_signature_rate",
+    "previous_profile",
+    "s3_clean_streak",
+    ###
     "risk_level",
     "energy_bucket",
     "tx_size_bytes",
