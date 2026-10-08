@@ -229,18 +229,19 @@ def run_batch(
                         # policy_mac | profile_id | state_per |
                         # state_security_risk | state_s3_clean_streak
                         env["EA_TAMPER_FIELD"] = (
-                            os.environ.get(
-                                "EA_TAMPER_FIELD",
-                                "policy_mac",
-                            )
+                            os.environ.get("EA_TAMPER_FIELD","policy_mac",)
                         )
                         # Used by state-input manipulation attacks.
                         env["EA_TAMPER_STATE_DELTA"] = (
-                            os.environ.get(
-                                "EA_TAMPER_STATE_DELTA",
-                                "0.05",
-                            )
+                            os.environ.get("EA_TAMPER_STATE_DELTA", "0.05",)
                         )
+
+                        ### new
+                        env["EA_TAMPER_MAX_EVENTS"] = (
+                            os.environ.get("EA_TAMPER_MAX_EVENTS", "0",)
+                        )
+                        ###
+
                     else:
                         env["EA_ENABLE_POLICY_TAMPERING"] = "0"
                         env.pop("EA_TAMPER_POLICY_PROB", None,)
@@ -248,6 +249,9 @@ def run_batch(
                         env.pop("EA_TAMPER_MESSAGE_TYPES", None,)
                         env.pop("EA_TAMPER_FIELD", None,)
                         env.pop("EA_TAMPER_STATE_DELTA", None,)
+                        ###
+                        env.pop("EA_TAMPER_MAX_EVENTS", None,)
+                        ###
                     ###
 
                     print(f">>> NODES={size} RUN={env['RUN']} SEED={env['UWSN_SEED']}")

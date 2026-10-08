@@ -1919,6 +1919,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
             ###
             if downgrade_observed:
+                tx_ea["downgrade_detected"] = True
+
                 update_cross_layer_observation(
                     ea_ctx,
                     receiver_id,
@@ -2766,6 +2768,8 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
 
                     ###
                     if retry_downgrade_observed:
+                        tx_ea["downgrade_detected"] = True
+                        
                         update_cross_layer_observation(
                             ea_ctx,
                             receiver_id,

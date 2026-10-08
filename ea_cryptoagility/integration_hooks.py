@@ -953,6 +953,13 @@ def maybe_tamper_policy_metadata(
     if not isinstance(tx.get("policy_meta"), dict):
         return tx
 
+    ### new
+    # A transaction already tampered with must not be tampered
+    # again if it is processed/retried through the same path.
+    if bool(tx.get("policy_tamper_injected", False)):
+        return tx
+    ###
+
     # Global switch
     enabled = int(os.environ.get("EA_ENABLE_POLICY_TAMPERING", "0"))
     if enabled != 1:
@@ -992,8 +999,40 @@ def maybe_tamper_policy_metadata(
     if prob <= 0.0:
         return tx
 
+    ### new
+    # ========================================================
+    # Finite attack burst
+    # ========================================================
+    # EA_TAMPER_MAX_EVENTS = 0 means unlimited.
+    # Otherwise only the first N actual injected attacks
+    # are allowed during this simulation run.
+    # The counter lives in ea_ctx, therefore it is isolated
+    # between independent runs.
+    # ========================================================
+    max_events = max(
+        0,
+        int(os.environ.get("EA_TAMPER_MAX_EVENTS", "0",)),
+    )
+
+    tamper_events_injected = int(
+        ea_ctx.get("_tamper_events_injected", 0,)
+    )
+
+    if (
+        max_events > 0
+        and tamper_events_injected >= max_events
+    ):
+        return tx
+    ###
+
     if random.random() > prob:
         return tx
+
+    ### new
+    # Count only attacks that are actually injected.
+    ea_ctx["_tamper_events_injected"] = (tamper_events_injected + 1)
+    tx["tamper_event_index"] = int(ea_ctx["_tamper_events_injected"])
+    ###
 
     meta = tx["policy_meta"]
 
