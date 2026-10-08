@@ -142,11 +142,7 @@ def run_batch(
                     env["UAN_ALLOW_PER_OVERRIDE"] = (
                         "0"
                         if str(data_per_override).strip().lower()
-                        in {
-                            "",
-                            "none",
-                            "null",
-                        }
+                        in {"", "none", "null",}
                         else "1"
                     )
 
@@ -189,21 +185,70 @@ def run_batch(
 
                     env["SIM_DURATION_S"] = (os.environ.get("SIM_DURATION_S","600",))
 
+                    # # ------------------------------------------------------------
+                    # # Security experiment: IRR via policy_meta tampering
+                    # # ------------------------------------------------------------
+                    # if security_irr and ea_enabled == 1 and ea_scenario_id == "SC4_HIGH_RISK":
+                    #     env["EA_ENABLE_POLICY_TAMPERING"] = "1"
+                    #     env["EA_TAMPER_POLICY_PROB"] = "0.10"
+                    #     env["EA_TAMPER_SCENARIOS"] = "SC4_HIGH_RISK"
+                    #     env["EA_TAMPER_MESSAGE_TYPES"] = "KEY_UPDATE"
+                    #     env["EA_TAMPER_FIELD"] = "policy_mac"
+                    # else:
+                    #     env["EA_ENABLE_POLICY_TAMPERING"] = "0"
+                    #     env.pop("EA_TAMPER_POLICY_PROB", None)
+                    #     env.pop("EA_TAMPER_SCENARIOS", None)
+                    #     env.pop("EA_TAMPER_MESSAGE_TYPES", None)
+                    #     env.pop("EA_TAMPER_FIELD", None)
+
+                    ###
                     # ------------------------------------------------------------
-                    # Security experiment: IRR via policy_meta tampering
+                    # Security experiment: controlled SC4 tampering
                     # ------------------------------------------------------------
-                    if security_irr and ea_enabled == 1 and ea_scenario_id == "SC4_HIGH_RISK":
+                    if (
+                        security_irr
+                        and ea_enabled == 1
+                        and ea_scenario_id == "SC4_HIGH_RISK"
+                    ):
                         env["EA_ENABLE_POLICY_TAMPERING"] = "1"
-                        env["EA_TAMPER_POLICY_PROB"] = "0.10"
-                        env["EA_TAMPER_SCENARIOS"] = "SC4_HIGH_RISK"
-                        env["EA_TAMPER_MESSAGE_TYPES"] = "KEY_UPDATE"
-                        env["EA_TAMPER_FIELD"] = "policy_mac"
+
+                        # Attack probability:
+                        # PowerShell can override this value.
+                        env["EA_TAMPER_POLICY_PROB"] = (
+                            os.environ.get("EA_TAMPER_POLICY_PROB", "0.30",)
+                        )
+                        env["EA_TAMPER_SCENARIOS"] = ("SC4_HIGH_RISK")
+
+                        # For the DATA-plane SC4 smoke test.
+                        env["EA_TAMPER_MESSAGE_TYPES"] = (
+                            os.environ.get(
+                                "EA_TAMPER_MESSAGE_TYPES",
+                                "TELEMETRY,CONTROL",
+                            )
+                        )
+                        # policy_mac | profile_id | state_per |
+                        # state_security_risk | state_s3_clean_streak
+                        env["EA_TAMPER_FIELD"] = (
+                            os.environ.get(
+                                "EA_TAMPER_FIELD",
+                                "policy_mac",
+                            )
+                        )
+                        # Used by state-input manipulation attacks.
+                        env["EA_TAMPER_STATE_DELTA"] = (
+                            os.environ.get(
+                                "EA_TAMPER_STATE_DELTA",
+                                "0.05",
+                            )
+                        )
                     else:
                         env["EA_ENABLE_POLICY_TAMPERING"] = "0"
-                        env.pop("EA_TAMPER_POLICY_PROB", None)
-                        env.pop("EA_TAMPER_SCENARIOS", None)
-                        env.pop("EA_TAMPER_MESSAGE_TYPES", None)
-                        env.pop("EA_TAMPER_FIELD", None)
+                        env.pop("EA_TAMPER_POLICY_PROB", None,)
+                        env.pop("EA_TAMPER_SCENARIOS", None,)
+                        env.pop("EA_TAMPER_MESSAGE_TYPES", None,)
+                        env.pop("EA_TAMPER_FIELD", None,)
+                        env.pop("EA_TAMPER_STATE_DELTA", None,)
+                    ###
 
                     print(f">>> NODES={size} RUN={env['RUN']} SEED={env['UWSN_SEED']}")
                     # knobs de rendimiento/registro (ver sección 4)
@@ -218,7 +263,10 @@ def run_batch(
 
 if __name__ == "__main__":
 
-    SECURITY_IRR = False   # False: campaña normal / True: campaña DDR-IRR
+    SECURITY_IRR = (
+        os.environ.get("SECURITY_IRR", "0",).strip().lower()
+        in {"1", "true", "yes", "on",}
+    )
 
     if SECURITY_IRR:
         ea_modes = [1]
@@ -232,6 +280,7 @@ if __name__ == "__main__":
             ea_modes = [0, 1]
 
         scenario_filter = os.environ.get("EA_SCENARIO_ID", "")
+        
         if scenario_filter:
             ea_scenarios = [scenario_filter]
         else:
