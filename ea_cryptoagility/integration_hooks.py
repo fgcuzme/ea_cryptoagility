@@ -650,6 +650,49 @@ def attach_policy_to_transaction(
     return tx
 
 
+# def verify_transaction_policy(
+#     tx: Dict[str, Any],
+#     node: Dict[str, Any],
+#     epoch: int,
+#     key: bytes = DEFAULT_POLICY_KEY,
+#     thresholds: Thresholds = Thresholds(),
+# ) -> bool:
+#     """
+#     Recompute expected policy from stored ea_state and verify metadata.
+#     Use this during transaction validation/ingestion.
+#     """
+#     meta = tx.get("policy_meta") or {}
+#     state_dict = tx.get("ea_state") or {}
+#     if not meta or not state_dict:
+#         return False
+
+#     # Rebuild CrossLayerState safely.
+#     state = CrossLayerState(
+#         node_id=int(state_dict.get("node_id", node.get("NodeID", -1))),
+#         time_s=float(state_dict.get("time_s", 0.0)),
+#         message_type=MessageType(state_dict.get("message_type", "TELEMETRY")),
+#         residual_energy_j=float(state_dict.get("residual_energy_j", 100.0)),
+#         initial_energy_j=float(state_dict.get("initial_energy_j", 100.0)),
+#         per=float(state_dict.get("per", 0.0)),
+#         snr_db=state_dict.get("snr_db"),
+#         retransmission_rate=float(state_dict.get("retransmission_rate", 0.0)),
+#         dag_load=float(state_dict.get("dag_load", 0.0)),
+#         security_risk=float(state_dict.get("security_risk", 0.0)),
+#         invalid_signature_rate=float(state_dict.get("invalid_signature_rate", 0.0)),
+#         downgrade_detected=bool(state_dict.get("downgrade_detected", False)),
+#         replay_detected=bool(state_dict.get("replay_detected", False)),
+#         suspicious_identity=bool(state_dict.get("suspicious_identity", False)),
+#         role=str(state_dict.get("role",node.get("Role", "SN"))),
+#         neighbor_id=state_dict.get("neighbor_id"),
+#         attack_label=str(state_dict.get("attack_label","NONE")),
+#         previous_profile=str(state_dict.get("previous_profile", ProfileID.S1.value,)),
+#         s3_clean_streak=max(0, int(state_dict.get("s3_clean_streak", 0,)),),
+#     )
+#     expected_policy = select_policy(state, thresholds)
+
+#     return verify_policy_metadata(meta, expected_policy, state, epoch=epoch, key=key)
+
+## new
 def verify_transaction_policy(
     tx: Dict[str, Any],
     node: Dict[str, Any],
@@ -658,40 +701,154 @@ def verify_transaction_policy(
     thresholds: Thresholds = Thresholds(),
 ) -> bool:
     """
-    Recompute expected policy from stored ea_state and verify metadata.
-    Use this during transaction validation/ingestion.
+    Recompute the expected policy from the transmitted
+    cross-layer state and verify policy metadata.
+    R1 security hardening:
+      1. Rebuild the transmitted state.
+      2. Recompute the derived security risk locally.
+      3. Reject if transmitted SR_i differs from the
+         locally recomputed value.
+      4. Verify policy_meta and its cryptographic
+         binding to the policy-relevant state.
     """
     meta = tx.get("policy_meta") or {}
     state_dict = tx.get("ea_state") or {}
+
     if not meta or not state_dict:
         return False
 
-    # Rebuild CrossLayerState safely.
-    state = CrossLayerState(
-        node_id=int(state_dict.get("node_id", node.get("NodeID", -1))),
-        time_s=float(state_dict.get("time_s", 0.0)),
-        message_type=MessageType(state_dict.get("message_type", "TELEMETRY")),
-        residual_energy_j=float(state_dict.get("residual_energy_j", 100.0)),
-        initial_energy_j=float(state_dict.get("initial_energy_j", 100.0)),
-        per=float(state_dict.get("per", 0.0)),
-        snr_db=state_dict.get("snr_db"),
-        retransmission_rate=float(state_dict.get("retransmission_rate", 0.0)),
-        dag_load=float(state_dict.get("dag_load", 0.0)),
-        security_risk=float(state_dict.get("security_risk", 0.0)),
-        invalid_signature_rate=float(state_dict.get("invalid_signature_rate", 0.0)),
-        downgrade_detected=bool(state_dict.get("downgrade_detected", False)),
-        replay_detected=bool(state_dict.get("replay_detected", False)),
-        suspicious_identity=bool(state_dict.get("suspicious_identity", False)),
-        role=str(state_dict.get("role",node.get("Role", "SN"))),
-        neighbor_id=state_dict.get("neighbor_id"),
-        attack_label=str(state_dict.get("attack_label","NONE")),
-        previous_profile=str(state_dict.get("previous_profile", ProfileID.S1.value,)),
-        s3_clean_streak=max(0, int(state_dict.get("s3_clean_streak", 0,)),),
+    # ========================================================
+    # Preserve the SR_i value received on the wire.
+    #
+    # select_policy() recomputes state.security_risk, therefore
+    # we must save the transmitted value BEFORE calling it.
+    # ========================================================
+    transmitted_security_risk = float(
+        state_dict.get("security_risk", 0.0,)
     )
-    expected_policy = select_policy(state, thresholds)
 
-    return verify_policy_metadata(meta, expected_policy, state, epoch=epoch, key=key)
+    # ========================================================
+    # Rebuild transmitted cross-layer state
+    # ========================================================
 
+    state = CrossLayerState(
+        node_id=int(
+            state_dict.get("node_id", node.get("NodeID", -1),)
+        ),
+
+        time_s=float(
+            state_dict.get("time_s", 0.0,)
+        ),
+
+        message_type=MessageType(
+            state_dict.get("message_type", "TELEMETRY",)
+        ),
+
+        residual_energy_j=float(
+            state_dict.get("residual_energy_j",100.0,)
+        ),
+
+        initial_energy_j=float(
+            state_dict.get("initial_energy_j", 100.0,)
+        ),
+
+        per=float(
+            state_dict.get("per", 0.0,)
+        ),
+
+        snr_db=state_dict.get(
+            "snr_db"
+        ),
+
+        retransmission_rate=float(
+            state_dict.get("retransmission_rate", 0.0,)
+        ),
+
+        dag_load=float(
+            state_dict.get("dag_load", 0.0,)
+        ),
+
+        # Keep the transmitted value during reconstruction.
+        # select_policy() will recompute it below.
+        security_risk=
+            transmitted_security_risk,
+
+        invalid_signature_rate=float(
+            state_dict.get("invalid_signature_rate", 0.0,)
+        ),
+
+        downgrade_detected=bool(
+            state_dict.get("downgrade_detected", False,)
+        ),
+
+        replay_detected=bool(
+            state_dict.get("replay_detected",False,)
+        ),
+
+        suspicious_identity=bool(
+            state_dict.get("suspicious_identity", False,)
+        ),
+
+        role=str(
+            state_dict.get("role", node.get("Role", "SN"),)
+        ),
+
+        neighbor_id=
+            state_dict.get("neighbor_id"),
+
+        attack_label=str(
+            state_dict.get("attack_label", "NONE",)
+        ),
+
+        previous_profile=str(
+            state_dict.get("previous_profile", ProfileID.S1.value,)
+        ),
+
+        s3_clean_streak=max(
+            0,
+            int(state_dict.get("s3_clean_streak", 0,)),
+        ),
+    )
+
+    # ========================================================
+    # Recompute policy and derived SR_i
+    # ========================================================
+    # select_policy() calls the security-risk computation and
+    # overwrites state.security_risk with the derived value.
+    # ========================================================
+    expected_policy = select_policy(
+        state,
+        thresholds,
+    )
+
+    recomputed_security_risk = float(
+        state.security_risk
+    )
+
+    # ========================================================
+    # Derived-state consistency check
+    # ========================================================
+    # An attacker must not be able to manipulate the serialized
+    # security_risk independently from PER_i, Ret_i, Inv_i,
+    # criticality and the other policy inputs.
+    # ========================================================
+    if abs(
+        transmitted_security_risk
+        - recomputed_security_risk
+    ) > 1e-6:
+        return False
+
+    # ========================================================
+    # Verify visible metadata + MAC-bound state
+    # ========================================================
+    return verify_policy_metadata(
+        meta,
+        expected_policy,
+        state,
+        epoch=epoch,
+        key=key,
+    )
+###
 
 def log_ea_transaction(
     logger: EAEventLogger,
@@ -864,6 +1021,30 @@ def maybe_tamper_policy_metadata(
 
     elif tamper_field == "epoch":
         meta["epoch"] = int(meta.get("epoch", 1)) + 999
+
+    ###
+    # ========================================================
+    # R1: cross-layer policy-input manipulation
+    # ========================================================
+    elif tamper_field == "state_per":
+        state = tx.setdefault("ea_state", {},)
+        old_per = float(state.get("per", 0.0,))
+        delta = float(os.environ.get("EA_TAMPER_STATE_DELTA", "0.05",))
+        state["per"] = max(0.0, min(1.0, old_per + delta,),)
+        state["attack_label"] = ("STATE_PER_TAMPERING")
+
+    elif tamper_field == "state_security_risk":
+        state = tx.setdefault("ea_state", {},)
+        old_sr = float(state.get("security_risk", 0.0,))
+        delta = float(os.environ.get("EA_TAMPER_STATE_DELTA", "0.05",))
+        state["security_risk"] = max(0.0, min(1.0, old_sr + delta,),)
+        state["attack_label"] = ("STATE_SECURITY_RISK_TAMPERING")
+
+    elif tamper_field == "state_s3_clean_streak":
+        state = tx.setdefault("ea_state", {},)
+        state["s3_clean_streak"] = (int(state.get("s3_clean_streak", 0,))+ 1)
+        state["attack_label"] = ("STATE_S3_STREAK_TAMPERING")
+    ###
 
     else:
         # Default safe tamper: corrupt MAC.
