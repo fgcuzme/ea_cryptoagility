@@ -677,9 +677,19 @@ def run_one(RUN_NUM:int, SEED:int, NUM_NODES:int,
                 tx=txgenesis,
                 latency_ms=time_createTX * 1000.0,
                 pdr=1.0,
-                downgrade_injected=EA_SCENARIO.downgrade_detected,
-                invalid_policy_meta=False,
-                invalid_tx_rejected=False,
+                downgrade_injected=bool(
+                    txgenesis.get("policy_tamper_injected", False,)
+                    and
+                    txgenesis.get("tampered_policy_field", "",) == "profile_id"
+                ),
+
+                invalid_policy_meta=bool(
+                    txgenesis.get("invalid_policy_meta", False,)
+                ),
+
+                invalid_tx_rejected=bool(
+                    txgenesis.get("invalid_tx_rejected", False,)
+                ),
             )
             
         # Confirmacion tx

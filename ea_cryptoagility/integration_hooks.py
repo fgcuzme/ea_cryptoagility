@@ -913,7 +913,11 @@ def log_ea_transaction(
         "num_rekey": ops.get("X25519", 0),
         "num_checkpoint": ops.get("CHECKPOINT_HASH", 0),
         "downgrade_injected": downgrade_injected,
-        "downgrade_detected": state.get("downgrade_detected", False),
+        "downgrade_detected": bool(
+            tx.get("downgrade_detected", 
+                   state.get("downgrade_detected", False,),
+            )
+        ),
         "replay_detected": state.get("replay_detected", False),
         "invalid_policy_meta": invalid_policy_meta,
         "invalid_tx_rejected": invalid_tx_rejected,
