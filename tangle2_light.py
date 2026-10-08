@@ -9,7 +9,11 @@ from collections import deque
 from tangle_logger_light import log_tangle_event, MsTimer
 import msgpack
 
-from ea_cryptoagility.integration_hooks import verify_transaction_policy
+from ea_cryptoagility.integration_hooks import (
+    verify_transaction_policy,
+    update_cross_layer_observation,
+    log_ea_transaction,
+)
 
 ## Establecer variables globales para num_tips=2, check_fresh=True, alpha=0.3, max_steps=200
 
@@ -629,12 +633,61 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
                 key=ea_ctx["policy_key"],
             )
 
+            ###
+            # ============================================================
+            # Cross-layer security observation
+            # ============================================================
+            # The receiver records the REAL result of policy verification.
+            #   valid  -> 0 sample in Inv_i(t)
+            #   invalid -> 1 sample in Inv_i(t)
+            # This observation affects FUTURE policy decisions only.
+            # ============================================================
+            receiver_node_id = int(node.get("NodeID", -1,))
+
+            update_cross_layer_observation(
+                ea_ctx,
+                receiver_node_id,
+                verification_valid=bool(valid_policy),
+            )
+            ###
+
+            ###
+            # ============================================================
+            # Classify observed policy attack
+            # ============================================================
+            tamper_injected = bool(
+                tx.get("policy_tamper_injected", False,)
+            )
+
+            tampered_field = str(
+                tx.get("tampered_policy_field", "",)
+            )
+
+            # A downgrade is only claimed when profile_id itself
+            # was modified and the manipulation was detected.
+            downgrade_observed = bool(
+                not valid_policy
+                and tamper_injected
+                and tampered_field == "profile_id"
+            )
+
+            if downgrade_observed:
+                update_cross_layer_observation(
+                    ea_ctx,
+                    receiver_node_id,
+                    downgrade_detected=True,
+                )
+            ###
+
             if not valid_policy:
+                ### new
                 tx["invalid_policy_meta"] = True
-                tx["downgrade_detected"] = True
+                tx["invalid_tx_rejected"] = True
+                tx["downgrade_detected"] = bool(downgrade_observed)
+                ###
 
                 if ea_ctx.get("logger") is not None:
-                    from ea_cryptoagility.integration_hooks import log_ea_transaction
+                    # from ea_cryptoagility.integration_hooks import log_ea_transaction
 
                     log_ea_transaction(
                         logger=ea_ctx["logger"],
@@ -644,7 +697,8 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
                         tx=tx,
                         latency_ms=0.0,
                         pdr=0.0,
-                        downgrade_injected=ea_ctx["scenario"].downgrade_detected,
+                        downgrade_injected=bool(tamper_injected
+                                                 and tampered_field == "profile_id"),
                         invalid_policy_meta=True,
                         invalid_tx_rejected=True,
                     )
@@ -658,7 +712,7 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
 
             if EA_STRICT_POLICY == 1:
                 if ea_ctx.get("logger") is not None:
-                    from ea_cryptoagility.integration_hooks import log_ea_transaction
+                    # from ea_cryptoagility.integration_hooks import log_ea_transaction
 
                     log_ea_transaction(
                         logger=ea_ctx["logger"],
@@ -707,7 +761,7 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
 
 
 # === RX: validar y loggear Nonce/TS/Replay ===
-def validate_rx_tx_and_log(RUN_ID, node, tx, phase="auth", module="tangle"):
+def validate_rx_tx_and_log(RUN_ID, node, tx, phase="auth", module="tangle", ea_ctx=None,):
     _ensure_dag_state(node)
     now = time.time()
 
@@ -727,6 +781,23 @@ def validate_rx_tx_and_log(RUN_ID, node, tx, phase="auth", module="tangle"):
 
     with MsTimer() as t_replay:
         replay_ok = (nonce_ok and ts_ok)
+
+        ### new
+        # ============================================================
+        # Replay evidence -> cross-layer observation
+        # ============================================================
+        if (
+            ea_ctx is not None
+            and ea_ctx.get("enabled", False,)
+            and not replay_ok
+        ):
+
+            update_cross_layer_observation(
+                ea_ctx,
+                int(node.get("NodeID", -1,)),
+                replay_detected=True,
+            )
+        ###
     replay_ms = t_replay.ms
 
     # Suma de tiempos de este tiempo

@@ -584,10 +584,25 @@ def attach_policy_to_transaction(
     ##
 
     meta = build_policy_metadata(policy, state, epoch=epoch, key=key)
-
     tx["Policy"] = policy.as_dict()
     tx["policy_meta"] = meta.as_dict()
     tx["ea_state"] = state.as_dict()
+
+    ###
+    # ========================================================
+    # Consume one-shot adversarial evidence
+    # ========================================================
+    # Security-event flags remain latched until they have
+    # participated in at least one policy decision.
+    # Persistent evidence is still represented by windowed
+    # metrics such as Inv_i(t).
+    # ========================================================
+    if ea_ctx is not None:
+        obs = _get_node_observation(ea_ctx, state.node_id,)
+        obs["downgrade_detected"] = False
+        obs["replay_detected"] = False
+        obs["suspicious_identity"] = False
+    ###
 
     # # Update optional cost fields.
     # # cost = estimate_total_transaction_cost(policy, retransmissions=int(round(retransmission_rate)))

@@ -400,7 +400,9 @@ def propagate_tx_to_ch(RUN_ID, sink1, ch_list, node_uw1, genesis_tx, E_schedule,
 
                         # firts validate the Tx
                         # rx_ok te dice si supera antireplay; ya estás verificando firma aparte.
-                        rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, Ch_node, genesis_tx, phase="auth", module="tangle")
+                        rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, Ch_node,
+                                                                    genesis_tx, phase="auth", 
+                                                                    module="tangle", ea_ctx=ea_ctx,)
                         
                         # if not Tx confirmed, jump the while
                         if not rx_ok:
@@ -717,7 +719,9 @@ def propagate_genesis_to_cluster(RUN_ID, node_uw2, ch_index, genesis_tx, E_sched
                             
                             # firts validate the Tx
                             # rx_ok te dice si supera antireplay; ya estás verificando firma aparte.
-                            rx_ok, validate_ms  = validate_rx_tx_and_log(RUN_ID, node1, genesis_tx, phase="auth", module="tangle")
+                            rx_ok, validate_ms  = validate_rx_tx_and_log(RUN_ID, node1,
+                                                                         genesis_tx, phase="auth",
+                                                                         module="tangle", ea_ctx=ea_ctx,)
                             
                             # if not Tx confirmed, jump the while
                             if not rx_ok:
@@ -1076,8 +1080,9 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
 
                     # firts, validate the Tx
                     # rx_ok te dice si supera antireplay; ya estás verificando firma aparte.
-                    rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, sink1, auth_response_tx1, phase="auth", 
-                                                                module="tangle")
+                    rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, sink1, 
+                                                                auth_response_tx1, phase="auth", 
+                                                                module="tangle", ea_ctx=ea_ctx,)
                     
                     # if not Tx confirmed, jump the while
                     if not rx_ok:
@@ -1305,7 +1310,8 @@ def propagate_tx_to_sink_and_cluster(RUN_ID, sink1, list_ch, node_uw3, E_schedul
                             # firts, validate the Tx
                             # rx_ok te dice si supera antireplay; ya estás verificando firma aparte.
                             rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, node2, auth_response_tx1, 
-                                                                        phase="auth", module="tangle")
+                                                                        phase="auth", module="tangle", 
+                                                                        ea_ctx=ea_ctx,)
                             
                             # if not Tx confirmed, jump the while
                             if not rx_ok:
@@ -1669,7 +1675,7 @@ def authenticate_nodes_to_ch(RUN_ID, nodes, chead, E_schedule, ronda, ea_ctx=Non
                             # firts, validate the Tx
                             # rx_ok te dice si supera antireplay; ya estás verificando firma aparte.
                             rx_ok, validate_ms = validate_rx_tx_and_log(RUN_ID, node_ch, node_auth_tx, phase="auth", 
-                                                                        module="tangle")
+                                                                        module="tangle", ea_ctx=ea_ctx,)
                             
                             # if not Tx confirmed, jump the while
                             if not rx_ok:

@@ -1911,12 +1911,21 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                 ea_ctx,
                 receiver_id,
                 verification_valid=bool(ea_policy_valid),
-                # False también es significativo:
-                # una siguiente verificación limpia borra una evidencia
-                # de downgrade puntual y permite iniciar cooldown S3.
-                downgrade_detected=downgrade_observed,
+                # # False también es significativo:
+                # # una siguiente verificación limpia borra una evidencia
+                # # de downgrade puntual y permite iniciar cooldown S3.
+                # downgrade_detected=downgrade_observed,
             )
 
+            ###
+            if downgrade_observed:
+                update_cross_layer_observation(
+                    ea_ctx,
+                    receiver_id,
+                    downgrade_detected=True,
+                )
+            ###
+            
             # --------------------------------------------------------
             # Rechazo de protocolo
             # --------------------------------------------------------
@@ -2752,9 +2761,17 @@ def transmit_data(RUN_ID, db_path, nodes, sender_node, receiver_node, plaintext,
                         ea_ctx,
                         receiver_id,
                         verification_valid=bool(retry_policy_valid),
-
-                        downgrade_detected=retry_downgrade_observed,
+                        # downgrade_detected=retry_downgrade_observed,
                     )
+
+                    ###
+                    if downgrade_observed:
+                        update_cross_layer_observation(
+                            ea_ctx,
+                            receiver_id,
+                            downgrade_detected=True,
+                        )
+                    ###
 
                     if not retry_policy_valid:
                         retry_accepted = False
