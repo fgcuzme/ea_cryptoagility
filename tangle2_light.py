@@ -437,12 +437,66 @@ def _to_id_list(tips):
             out.append(x); seen.add(x)
     return out
 
+# def _rebuild_tx_index(node):
+#     _ensure_dag_state(node)
+#     node["_tx_index"].clear()
+#     for tx in node["Transactions"]:
+#         txid = str(tx.get("ID"))
+#         if txid: node["_tx_index"][txid] = tx
+
+### new
 def _rebuild_tx_index(node):
+    """
+    Rebuild all derived DAG indexes from Transactions.
+    This keeps _tx_index, _approvers and _score consistent.
+    """
     _ensure_dag_state(node)
+
     node["_tx_index"].clear()
-    for tx in node["Transactions"]:
-        txid = str(tx.get("ID"))
-        if txid: node["_tx_index"][txid] = tx
+    node["_approvers"].clear()
+    node["_score"].clear()
+
+    # --------------------------------------------------------
+    # First pass: transaction index
+    # --------------------------------------------------------
+    for tx in node.get("Transactions", []):
+        txid = str(tx.get("ID", "",)
+        )
+
+        if not txid:
+            continue
+
+        node["_tx_index"][txid] = tx
+        node["_score"].setdefault(txid, 0,)
+
+    # --------------------------------------------------------
+    # Second pass: reverse DAG edges and direct scores
+    # --------------------------------------------------------
+    for tx in node.get("Transactions", []):
+        child_id = str(tx.get("ID", "",))
+        if not child_id:
+            continue
+
+        parents = _to_id_list(
+            tx.get("ApprovedTx", [],)
+        )
+
+        for parent in parents:
+            approvers = (
+                node["_approvers"]
+                .setdefault(
+                    parent,
+                    [],
+                )
+            )
+
+            if child_id not in approvers:
+                approvers.append(child_id)
+
+            node["_score"][parent] = len(
+                approvers
+            )
+###
 
 def select_tips(tips, num_tips):
     """

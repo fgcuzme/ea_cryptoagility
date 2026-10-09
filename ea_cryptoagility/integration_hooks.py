@@ -88,13 +88,22 @@ def measure_local_dag_load(
     # --------------------------------------------------------
     tx_index = node.get("_tx_index", {},)
 
-    if isinstance(tx_index, dict) and tx_index:
+    # if isinstance(tx_index, dict) and tx_index:
 
+    #     tip_ids = {
+    #         tip_id
+    #         for tip_id in tip_ids
+    #         if tip_id in tx_index
+    #     }
+
+    ### new
+    if isinstance(tx_index, dict):
         tip_ids = {
             tip_id
             for tip_id in tip_ids
             if tip_id in tx_index
         }
+    ###
 
     tip_count = len(tip_ids)
 
