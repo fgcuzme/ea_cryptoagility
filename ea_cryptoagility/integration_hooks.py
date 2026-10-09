@@ -28,6 +28,110 @@ DEFAULT_OBSERVATION_WINDOW = int(
 def _clip01(value: float) -> float:
     return max(0.0, min(1.0, float(value)),)
 
+### new
+# ============================================================
+# Local DAG-load observation
+# ============================================================
+
+DEFAULT_DAG_TIP_REF = max(
+    2,
+    int(os.environ.get("EA_DAG_TIP_REF", "8",)
+    ),
+)
+
+def measure_local_dag_load(
+    node: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Measures local Tangle pressure from the actual unresolved
+    tip set.
+    D_i(t) = clip(
+        (L_i(t) - L_0) /
+        (L_ref - L_0)
+    )
+    where:
+        L_i(t)  = number of valid local tips
+        L_0     = 1 low-load reference tip
+        L_ref   = configurable normalization reference
+    No SC1-SC5 synthetic DAG value is used.
+    """
+
+    if not isinstance(node, dict):
+        return {
+            "dag_load": 0.0,
+            "tip_count": 0,
+            "tip_ref": DEFAULT_DAG_TIP_REF,
+            "source": "NO_DAG_STATE",
+        }
+
+    raw_tips = node.get("Tips", [],)
+
+    # Normalize tip IDs and remove duplicates.
+    tip_ids = set()
+
+    for tip in raw_tips:
+        if (
+            isinstance(tip, dict)
+            and "ID" in tip
+        ):
+            tip_ids.add(
+                str(tip["ID"])
+            )
+
+        else:
+            tip_ids.add(
+                str(tip)
+            )
+
+    # --------------------------------------------------------
+    # Count only tips that still belong to the local DAG.
+    # --------------------------------------------------------
+    tx_index = node.get("_tx_index", {},)
+
+    if isinstance(tx_index, dict) and tx_index:
+
+        tip_ids = {
+            tip_id
+            for tip_id in tip_ids
+            if tip_id in tx_index
+        }
+
+    tip_count = len(tip_ids)
+
+    tip_ref = max(
+        2,
+        int(
+            os.environ.get(
+                "EA_DAG_TIP_REF",
+                str(
+                    DEFAULT_DAG_TIP_REF
+                ),
+            )
+        ),
+    )
+
+    low_load_ref = 1
+
+    dag_load = _clip01(
+        (
+            tip_count
+            - low_load_ref
+        )
+        /
+        float(
+            tip_ref
+            - low_load_ref
+        )
+    )
+
+    return {
+        "dag_load": float(dag_load),
+        "tip_count": int(tip_count),
+        "tip_ref": int(tip_ref),
+        "source": "LOCAL_TANGLE_TIPS",
+    }
+###
+
 def _get_observation_store(
     ea_ctx: Dict[str, Any],
 ) -> Dict[int, Dict[str, Any]]:
@@ -460,11 +564,32 @@ def build_state_from_uwsnsecure(
     observed = None
 
     if ea_ctx is not None:
+        ## new
+        # ========================================================
+        # Real local DAG observation
+        # ========================================================
+        dag_observation = (
+            measure_local_dag_load(node)
+        )
+
+        measured_dag_load = float(
+            dag_observation["dag_load"]
+        )
+
+        if ea_ctx is not None:
+            dag_store = ea_ctx.setdefault(
+                "_dag_observation_state",
+                {},
+            )
+
+            dag_store[node_id] = dict(dag_observation)
+        ###
+
         observed = get_cross_layer_observation(
             ea_ctx,
             node_id,
             fallback_per=per,
-            fallback_dag_load=dag_load,
+            fallback_dag_load=measured_dag_load,
         )
         
         per = observed["per"]

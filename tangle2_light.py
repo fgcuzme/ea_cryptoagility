@@ -344,9 +344,21 @@ def create_auth_response_tx(RUN_ID, node_ch1):
         if tip not in node_ch1["ApprovedTransactions"]:
             node_ch1["ApprovedTransactions"].append(tip)
 
+        ### new
+        approvers = (node_ch1["_approvers"].setdefault(str(tip), [],))
+
+        if new_tx["ID"] not in approvers:
+            approvers.append(new_tx["ID"])
+
+        node_ch1["_score"][str(tip)] = len(approvers)
+        ###
+        
     node_ch1["Transactions"].append(new_tx)
     node_ch1["Tips"].append(new_tx["ID"])
     node_ch1["_tx_index"][new_tx["ID"]] = new_tx
+    ### new
+    node_ch1["_score"].setdefault(new_tx["ID"], 0,)
+    ###
 
     return new_tx
 
@@ -357,6 +369,15 @@ def delete_tangle(nodo_sink, node_uw, CH):
     nodo_sink['Tips'] = []
     nodo_sink['ApprovedTransactions'] = []
     nodo_sink['Transactions'] = []
+
+    ## new
+    nodo_sink["_tx_index"] = {}
+    nodo_sink["_approvers"] = {}
+    nodo_sink["_score"] = {}
+
+    nodo_sink["_nonce_window"] = deque()
+    nodo_sink["_nonce_set"] = set()
+    ##
 
     # Restablecer el estado de autenticación en nodo_sink
     for i in range(len(nodo_sink['RegisterNodes'])):
@@ -370,6 +391,13 @@ def delete_tangle(nodo_sink, node_uw, CH):
         node['Transactions'] = []
         node['Authenticated'] = False
         node['ExclusionStatus'] = False
+        ### new
+        node["_tx_index"] = {}
+        node["_approvers"] = {}
+        node["_score"] = {}
+        node["_nonce_window"] = deque()
+        node["_nonce_set"] = set()
+        ###
 
     # Restablecer el estado de autenticación de cada nodo CH
     for ch_index in CH:
@@ -581,39 +609,6 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
     _ensure_dag_state(node)
     txid = str(tx["ID"])
 
-    #######################
-    # Verifica policy_meta antes de aceptar en DAG
-    # if ea_ctx is not None and ea_ctx.get("enabled", False):
-    #     epoch = int(tx.get("ea_state", {}).get("epoch", 1)) if isinstance(tx.get("ea_state"), dict) else 1
-
-    #     valid_policy = verify_transaction_policy(
-    #         tx=tx,
-    #         node=node,
-    #         epoch=epoch,
-    #         key=ea_ctx["policy_key"],
-    #     )
-
-    #     if not valid_policy:
-    #         tx["invalid_policy_meta"] = True
-    #         tx["downgrade_detected"] = True
-
-    #         if ea_ctx.get("logger") is not None:
-    #             from ea_cryptoagility.integration_hooks import log_ea_transaction
-    #             log_ea_transaction(
-    #                 logger=ea_ctx["logger"],
-    #                 run_id=ea_ctx["run_id"],
-    #                 seed=ea_ctx["seed"],
-    #                 scenario_id=ea_ctx["scenario_id"],
-    #                 tx=tx,
-    #                 latency_ms=0.0,
-    #                 pdr=0.0,
-    #                 downgrade_injected=True,
-    #                 invalid_policy_meta=True,
-    #                 invalid_tx_rejected=True,
-    #             )
-
-    #         return 0.0
-
     if ea_ctx is not None and ea_ctx.get("enabled", False):
 
         has_policy_fields = (
@@ -732,23 +727,78 @@ def ingest_tx(RUN_ID, node, tx: dict, add_as_tip: bool = True, ea_ctx=None):
 
     tips_before = len(node["Tips"]) # se agrega
 
+    # with MsTimer() as t_store:
+    #     if txid not in node["_tx_index"]:
+    #         node["Transactions"].append(tx)
+    #         node["_tx_index"][txid] = tx
+
+    #     # ---- reverse adjacency: parent -> approver(child) ----
+    #     for parent in _to_id_list(tx.get("ApprovedTx", [])):
+    #         node["_approvers"].setdefault(parent, []).append(txid)
+
+    #         # lightweight score: count direct approvers
+    #         node["_score"][parent] = node["_score"].get(parent, 0) + 1
+
+    #     # default score for this tx
+    #     node["_score"].setdefault(txid, node["_score"].get(txid, 0))
+
+    #     if add_as_tip and txid not in node["Tips"]:
+    #         node["Tips"].append(txid)
+
+    ### new
     with MsTimer() as t_store:
-        if txid not in node["_tx_index"]:
+        # ========================================================
+        # Idempotent DAG insertion
+        # ========================================================
+        is_new_tx = (txid not in node["_tx_index"])
+
+        if is_new_tx:
             node["Transactions"].append(tx)
             node["_tx_index"][txid] = tx
+            # Canonical ID lists.
+            node["Tips"] = _to_id_list(node.get("Tips", []))
+            node["ApprovedTransactions"] = (
+                _to_id_list(node.get("ApprovedTransactions", [],))
+            )
+            parents = _to_id_list(
+                tx.get("ApprovedTx", [],)
+            )
 
-        # ---- reverse adjacency: parent -> approver(child) ----
-        for parent in _to_id_list(tx.get("ApprovedTx", [])):
-            node["_approvers"].setdefault(parent, []).append(txid)
+            # ----------------------------------------------------
+            # The new transaction approves its parents.
+            # Therefore those parents cease to be tips.
+            # ----------------------------------------------------
+            for parent in parents:
+                approvers = (node["_approvers"].setdefault(parent, [],))
 
-            # lightweight score: count direct approvers
-            node["_score"][parent] = node["_score"].get(parent, 0) + 1
+                if txid not in approvers:
+                    approvers.append(txid)
 
-        # default score for this tx
-        node["_score"].setdefault(txid, node["_score"].get(txid, 0))
+                # Direct-approver score.
+                node["_score"][parent] = len(approvers)
 
-        if add_as_tip and txid not in node["Tips"]:
-            node["Tips"].append(txid)
+                if parent in node["Tips"]:
+                    node["Tips"].remove(parent)
+
+                if (
+                    parent
+                    not in
+                    node["ApprovedTransactions"]
+                ):
+                    node[
+                        "ApprovedTransactions"
+                    ].append(parent)
+
+            node["_score"].setdefault(
+                txid, 0,)
+
+            # The newly accepted transaction becomes a tip.
+            if (
+                add_as_tip
+                and txid not in node["Tips"]
+            ):
+                node["Tips"].append(txid)
+    ###
 
     log_tangle_event(
         run_id=RUN_ID, phase="auth", module="tangle", op="tips_store",
